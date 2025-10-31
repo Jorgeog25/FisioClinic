@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Clínica Fisio – Personas</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Arial; margin: 2rem; }
+    input, button { padding: .5rem; margin-right: .5rem; }
+    table { border-collapse: collapse; margin-top: 1rem; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: .5rem; }
+  </style>
+</head>
+<body>
+  <h1>Personas</h1>
+  <form id="formCreate">
+    <input id="nombre" placeholder="Nombre" required />
+    <input id="edad" type="number" placeholder="Edad" required />
+    <input id="email" type="email" placeholder="Email" />
+    <input id="telefono" placeholder="Teléfono" />
+    <button type="submit">Crear</button>
+  </form>
+
+  <div style="margin-top:1rem">
+    <input id="q" placeholder="Buscar (nombre/email/dni)" />
+    <button id="btnBuscar">Buscar</button>
+  </div>
+
+  <table id="tabla">
+    <thead>
+      <tr><th>Nombre</th><th>Edad</th><th>Email</th><th>Teléfono</th><th>Acciones</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    const API = "/api/personas";
+    const tbody = document.querySelector("#tabla tbody");
+
+    async function cargar(q="") {
+      const res = await fetch(`${API}?q=${encodeURIComponent(q)}`);
+      const json = await res.json();
+      tbody.innerHTML = "";
+      json.data.forEach(p => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${p.nombre}</td>
+          <td>${p.edad ?? ""}</td>
+          <td>${p.email ?? ""}</td>
+          <td>${p.telefono ?? ""}</td>
+          <td>
+            <button data-id="${p._id}" class="del">Eliminar</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // eliminar
+      document.querySelectorAll(".del").forEach(btn => {
+        btn.onclick = async () => {
+          if (!confirm("¿Eliminar?")) return;
+          await fetch(`${API}/${btn.dataset.id}`, { method: "DELETE" });
+          cargar(document.getElementById("q").value);
+        };
+      });
+    }
+
+    document.getElementById("btnBuscar").onclick = () =>
+      cargar(document.getElementById("q").value);
+
+    document.getElementById("formCreate").onsubmit = async (e) => {
+      e.preventDefault();
+      const body = {
+        nombre: document.getElementById("nombre").value,
+        edad: Number(document.getElementById("edad").value),
+        email: document.getElementById("email").value || undefined,
+        telefono: document.getElementById("telefono").value || undefined,
+      };
+      const res = await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const { error } = await res.json();
+        alert(error || "Error");
+        return;
+      }
+      e.target.reset();
+      cargar();
+    };
+
+    cargar();
+  </script>
+</body>
+</html>
