@@ -3,11 +3,11 @@ const ctrl = require("../controllers/persona.controller");
 
 const router = express.Router();
 
-// CRUD básico
-router.get("/", ctrl.listar);        // GET /api/personas?q=juan&page=1&limit=10
-router.get("/:id", ctrl.obtener);    // GET /api/personas/:id
-router.post("/", ctrl.crear);        // POST /api/personas
-router.put("/:id", ctrl.actualizar); // PUT /api/personas/:id
-router.delete("/:id", ctrl.eliminar);// DELETE /api/personas/:id
+// CRUD
+router.get("/",     ctrl.listar);
+router.get("/:id",  ctrl.obtener);
+router.post("/",    ctrl.crear);
+router.put("/:id",  ctrl.actualizar);
+router.delete("/:id", ctrl.eliminar);
 
 module.exports = router;

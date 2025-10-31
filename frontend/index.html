@@ -1,34 +1,62 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Clínica Fisio – Personas</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Clínica Fisio – Gestión de Pacientes</title>
   <style>
-    body { font-family: system-ui, -apple-system, Arial; margin: 2rem; }
-    input, button { padding: .5rem; margin-right: .5rem; }
-    table { border-collapse: collapse; margin-top: 1rem; width: 100%; }
-    th, td { border: 1px solid #ddd; padding: .5rem; }
+    body { font-family: system-ui, -apple-system, Arial; margin: 2rem; background: #f9fafb; }
+    h1 { margin-bottom: 1rem; }
+    form, .busqueda { background: white; padding: 1rem; border-radius: 10px; box-shadow: 0 0 5px rgba(0,0,0,0.1); margin-bottom: 1.5rem; }
+    input, textarea, button { padding: .5rem; margin: .3rem 0; border: 1px solid #ccc; border-radius: 5px; }
+    input, textarea { width: 100%; }
+    button { cursor: pointer; background: #22c55e; color: white; border: none; font-weight: 600; transition: .2s; }
+    button:hover { background: #16a34a; }
+    .btn-sec { background: #6b7280; }
+    .btn-sec:hover { background: #4b5563; }
+    .btn-warn { background: #ef4444; }
+    .btn-warn:hover { background: #dc2626; }
+    .btn-info { background: #3b82f6; }
+    .btn-info:hover { background: #2563eb; }
+    table { border-collapse: collapse; width: 100%; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 0 5px rgba(0,0,0,0.1); }
+    th, td { border-bottom: 1px solid #eee; padding: .75rem; text-align: left; vertical-align: top; }
+    th { background: #f3f4f6; }
+    tr:hover { background: #f9fafb; }
+    .row-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
+    .mode { font-size: .9rem; color: #6b7280; margin-left: .5rem; }
   </style>
 </head>
 <body>
-  <h1>Personas</h1>
-  <form id="formCreate">
+  <h1>Gestión de Pacientes <span id="mode" class="mode">(modo: crear)</span></h1>
+
+  <form id="form">
+    <h3 id="formTitle">Paciente</h3>
     <input id="nombre" placeholder="Nombre" required />
-    <input id="edad" type="number" placeholder="Edad" required />
-    <input id="email" type="email" placeholder="Email" />
+    <input id="apellidos" placeholder="Apellidos" required />
     <input id="telefono" placeholder="Teléfono" />
-    <button type="submit">Crear</button>
+    <textarea id="notas" placeholder="Notas sobre el paciente (opcional)"></textarea>
+    <input id="sesiones" type="number" placeholder="Número de sesiones" min="0" value="0" />
+    <div style="display:flex; gap:.5rem; flex-wrap:wrap">
+      <button type="submit" id="btnSubmit">Guardar paciente</button>
+      <button type="button" id="btnCancel" class="btn-sec" style="display:none">Cancelar edición</button>
+    </div>
   </form>
 
-  <div style="margin-top:1rem">
-    <input id="q" placeholder="Buscar (nombre/email/dni)" />
+  <div class="busqueda">
+    <input id="q" placeholder="Buscar por nombre, apellidos o teléfono" />
     <button id="btnBuscar">Buscar</button>
+    <button id="btnRecargar" class="btn-info">Recargar</button>
   </div>
 
   <table id="tabla">
     <thead>
-      <tr><th>Nombre</th><th>Edad</th><th>Email</th><th>Teléfono</th><th>Acciones</th></tr>
+      <tr>
+        <th>Nombre completo</th>
+        <th>Teléfono</th>
+        <th>Sesiones</th>
+        <th>Notas</th>
+        <th>Acciones</th>
+      </tr>
     </thead>
     <tbody></tbody>
   </table>
@@ -37,29 +65,97 @@
     const API = "/api/personas";
     const tbody = document.querySelector("#tabla tbody");
 
-    async function cargar(q="") {
+    // Estado de edición
+    let editingId = null;
+
+    function setFormMode(mode, persona = null) {
+      const modeEl = document.getElementById("mode");
+      const btnSubmit = document.getElementById("btnSubmit");
+      const btnCancel = document.getElementById("btnCancel");
+
+      if (mode === "create") {
+        editingId = null;
+        modeEl.textContent = "(modo: crear)";
+        btnSubmit.textContent = "Guardar paciente";
+        btnCancel.style.display = "none";
+        document.getElementById("form").reset();
+        document.getElementById("sesiones").value = 0;
+      } else {
+        editingId = persona._id;
+        modeEl.textContent = `(modo: editar ${persona.nombre} ${persona.apellidos})`;
+        btnSubmit.textContent = "Actualizar paciente";
+        btnCancel.style.display = "inline-block";
+        // Rellenar formulario
+        document.getElementById("nombre").value = persona.nombre ?? "";
+        document.getElementById("apellidos").value = persona.apellidos ?? "";
+        document.getElementById("telefono").value = persona.telefono ?? "";
+        document.getElementById("notas").value = persona.notas ?? "";
+        document.getElementById("sesiones").value = persona.sesiones ?? 0;
+        // Hacer scroll al formulario
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    }
+
+    async function cargar(q = "") {
       const res = await fetch(`${API}?q=${encodeURIComponent(q)}`);
       const json = await res.json();
       tbody.innerHTML = "";
       json.data.forEach(p => {
         const tr = document.createElement("tr");
         tr.innerHTML = `
-          <td>${p.nombre}</td>
-          <td>${p.edad ?? ""}</td>
-          <td>${p.email ?? ""}</td>
+          <td><strong>${p.nombre} ${p.apellidos}</strong></td>
           <td>${p.telefono ?? ""}</td>
+          <td>${p.sesiones ?? 0}</td>
+          <td>${p.notas ?? ""}</td>
           <td>
-            <button data-id="${p._id}" class="del">Eliminar</button>
+            <div class="row-actions">
+              <button data-id="${p._id}" class="edit btn-info">Editar</button>
+              <button data-id="${p._id}" class="inc btn-sec">+1 sesión</button>
+              <button data-id="${p._id}" class="del btn-warn">Eliminar</button>
+            </div>
           </td>
         `;
         tbody.appendChild(tr);
       });
 
-      // eliminar
+      // Editar
+      document.querySelectorAll(".edit").forEach(btn => {
+        btn.onclick = async () => {
+          const id = btn.dataset.id;
+          const res = await fetch(`${API}/${id}`);
+          if (!res.ok) { alert("No se pudo cargar el paciente"); return; }
+          const persona = await res.json();
+          setFormMode("edit", persona);
+        };
+      });
+
+      // +1 sesión
+      document.querySelectorAll(".inc").forEach(btn => {
+        btn.onclick = async () => {
+          const id = btn.dataset.id;
+          // Obtener actual para conocer sesiones vigentes
+          const resGet = await fetch(`${API}/${id}`);
+          if (!resGet.ok) { alert("No se pudo obtener el paciente"); return; }
+          const persona = await resGet.json();
+          const nuevas = Number(persona.sesiones || 0) + 1;
+
+          const resPut = await fetch(`${API}/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sesiones: nuevas, nombre: persona.nombre, apellidos: persona.apellidos, telefono: persona.telefono, notas: persona.notas }),
+          });
+          if (!resPut.ok) { alert("No se pudo actualizar sesiones"); return; }
+          cargar(document.getElementById("q").value);
+        };
+      });
+
+      // Eliminar
       document.querySelectorAll(".del").forEach(btn => {
         btn.onclick = async () => {
-          if (!confirm("¿Eliminar?")) return;
+          if (!confirm("¿Eliminar este paciente?")) return;
           await fetch(`${API}/${btn.dataset.id}`, { method: "DELETE" });
+          // Si estabas editándolo, vuelve a modo crear
+          if (editingId === btn.dataset.id) setFormMode("create");
           cargar(document.getElementById("q").value);
         };
       });
@@ -68,28 +164,58 @@
     document.getElementById("btnBuscar").onclick = () =>
       cargar(document.getElementById("q").value);
 
-    document.getElementById("formCreate").onsubmit = async (e) => {
-      e.preventDefault();
-      const body = {
-        nombre: document.getElementById("nombre").value,
-        edad: Number(document.getElementById("edad").value),
-        email: document.getElementById("email").value || undefined,
-        telefono: document.getElementById("telefono").value || undefined,
-      };
-      const res = await fetch(API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const { error } = await res.json();
-        alert(error || "Error");
-        return;
-      }
-      e.target.reset();
+    document.getElementById("btnRecargar").onclick = () => {
+      document.getElementById("q").value = "";
       cargar();
     };
 
+    document.getElementById("btnCancel").onclick = () => setFormMode("create");
+
+    // Crear o actualizar según modo
+    document.getElementById("form").onsubmit = async (e) => {
+      e.preventDefault();
+      const body = {
+        nombre: document.getElementById("nombre").value.trim(),
+        apellidos: document.getElementById("apellidos").value.trim(),
+        telefono: document.getElementById("telefono").value.trim() || undefined,
+        notas: document.getElementById("notas").value.trim() || undefined,
+        sesiones: Number(document.getElementById("sesiones").value) || 0,
+      };
+
+      try {
+        let res;
+        if (!editingId) {
+          // Crear
+          res = await fetch(API, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        } else {
+          // Actualizar
+          res = await fetch(`${API}/${editingId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        }
+
+        if (!res.ok) {
+          const { error } = await res.json();
+          alert(error || "Error en la operación");
+          return;
+        }
+
+        setFormMode("create");
+        cargar(document.getElementById("q").value);
+      } catch (err) {
+        console.error(err);
+        alert("Error de conexión");
+      }
+    };
+
+    // Inicio
+    setFormMode("create");
     cargar();
   </script>
 </body>
