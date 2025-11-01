@@ -1,52 +1,36 @@
-const express = require("express");
-const mongoose = require("mongoose");
-const cors = require("cors");
-const morgan = require("morgan");
-const path = require("path");
-const dotenv = require("dotenv");
+require('dotenv').config();
+const express = require('express');
+const morgan = require('morgan');
+const cors = require('cors');
+const connectDB = require('./src/config/db');
 
-// Cargar variables de entorno
-dotenv.config();
-
-const personasRouter = require("./routes/personas");
+const authRoutes = require('./src/routes/auth.routes');
+const clientRoutes = require('./src/routes/client.routes');
+const availabilityRoutes = require('./src/routes/availability.routes');
+const appointmentRoutes = require('./src/routes/appointment.routes');
+const paymentRoutes = require('./src/routes/payment.routes');
 
 const app = express();
-
-// Middlewares
 app.use(cors());
 app.use(express.json());
-app.use(morgan("combined"));
+app.use(morgan('dev'));
 
-// Rutas API
-app.use("/api/personas", personasRouter);
+connectDB();
 
-// Servir archivos estáticos del frontend
-app.use(express.static(path.join(__dirname, "../frontend")));
+app.get('/', (_, res) => res.json({ ok: true, service: 'Fisio Clinic API' }));
 
-// Ruta raíz -> index.html
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "../frontend/index.html"));
-});
+app.use('/api/auth', authRoutes);
+app.use('/api/clients', clientRoutes);
+app.use('/api/availability', availabilityRoutes);
+app.use('/api/appointments', appointmentRoutes);
+app.use('/api/payments', paymentRoutes);
 
-// Middleware de errores (centralizado)
+// Global error handler
 app.use((err, req, res, next) => {
   console.error(err);
   const status = err.status || 500;
-  res.status(status).json({ error: err.message || "Error interno del servidor" });
+  res.status(status).json({ error: err.message || 'Internal Server Error' });
 });
 
-// Conexión a Mongo y arranque del servidor
 const PORT = process.env.PORT || 3000;
-const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/clinica_fisio";
-
-mongoose.connect(MONGO_URI)
-  .then(() => {
-    console.log("Conectado a MongoDB");
-    app.listen(PORT, () => console.log(`Servidor en http://localhost:${PORT}`));
-  })
-  .catch(err => {
-    console.error("Error al conectar a MongoDB", err);
-    process.exit(1);
-  });
-
-module.exports = app;
+app.listen(PORT, () => console.log(`Fisio Clinic API running on http://localhost:${PORT}`));
