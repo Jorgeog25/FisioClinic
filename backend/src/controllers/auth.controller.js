@@ -11,7 +11,7 @@ function sign(user) {
   );
 }
 
-// ===== Registro público de CLIENTE =====
+// Registro público de CLIENTE
 exports.registerClient = async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -29,7 +29,7 @@ exports.registerClient = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-// ===== Registro ADMIN (crear admin o cliente) =====
+// Registro ADMIN (crear admin o cliente)
 exports.registerAny = async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -51,7 +51,7 @@ exports.registerAny = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-// ===== Login =====
+// Login
 exports.login = async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -71,7 +71,7 @@ exports.login = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-// ===== Perfil =====
+// Perfil
 exports.me = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id).select('-password');
