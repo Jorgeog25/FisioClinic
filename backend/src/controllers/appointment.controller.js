@@ -44,3 +44,24 @@ exports.updateStatus = async (req, res, next) => {
     res.json(appt);
   } catch (e) { next(e); }
 };
+
+exports.listByDate = async (req, res, next) => {
+  try {
+    const { date } = req.query;
+    const filter = date ? { date } : {};
+    const appts = await Appointment.find(filter)
+      .populate({ path: 'clientId', select: 'firstName lastName reason' })
+      .sort({ date: 1, time: 1 });
+    res.json(appts);
+  } catch (e) { next(e); }
+};
+
+exports.my = async (req, res, next) => {
+  try {
+    const clientId = req.user.clientId;
+    const appts = await Appointment.find({ clientId })
+      .populate({ path: 'clientId', select: 'firstName lastName reason' })
+      .sort({ date: -1, time: -1 });
+    res.json(appts);
+  } catch (e) { next(e); }
+};

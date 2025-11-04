@@ -40,6 +40,8 @@ export const api = {
   createClient: (payload) => request('/clients', { method:'POST', body: payload }),
   clientDetail: (id) => request(`/clients/${id}`),
   myHistory: () => request('/clients/me/history'),
+  updateClient: (id, payload) => request(`/clients/${id}`, { method:'PUT', body: payload }),     // 👈 nuevo
+  deleteClient: (id) => request(`/clients/${id}`, { method:'DELETE' }),
 
   // appointments
   book: (payload) => request('/appointments', { method:'POST', body: payload }),

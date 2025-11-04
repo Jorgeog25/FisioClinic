@@ -33,3 +33,18 @@ exports.update = async (req, res, next) => {
     res.json(client);
   } catch (e) { next(e); }
 };
+
+exports.remove = async (req, res, next) => {
+  try {
+    const id = req.params.id;
+
+    // Borrado en cascada (opcional pero recomendado)
+    await Appointment.deleteMany({ clientId: id });
+    await Payment.deleteMany({ clientId: id });
+
+    const deleted = await Client.findByIdAndDelete(id);
+    if (!deleted) return res.status(404).json({ error: 'Cliente no encontrado' });
+
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+};
