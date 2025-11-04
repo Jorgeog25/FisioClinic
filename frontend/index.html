@@ -1,36 +1,226 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Fisio Clinic</title>
     <style>
-      :root { --primary:#2563eb; --bg:#0f172a; --card:#111827; --muted:#94a3b8; }
-      *{box-sizing:border-box}
-      body{margin:0; font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; background:#0b1220; color:#e5e7eb}
-      a{color:inherit; text-decoration:none}
-      .container{max-width:980px; margin:0 auto; padding:20px}
-      .card{background:#0f172a; border:1px solid #1f2937; border-radius:14px; padding:16px; }
-      .btn{padding:10px 14px; border-radius:10px; border:1px solid #334155; background:#1f2937; color:#e5e7eb; cursor:pointer}
-      .btn.primary{background:var(--primary); border-color:#1d4ed8}
-      .btn:disabled{opacity:.6; cursor:not-allowed}
-      input, select{width:100%; padding:10px; border-radius:10px; border:1px solid #334155; background:#0b1220; color:#e5e7eb}
-      label{display:block; margin:10px 0 6px}
-      .row{display:grid; grid-template-columns:1fr 1fr; gap:12px}
-      .nav{display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap}
-      .pill{padding:6px 10px; border:1px solid #334155; border-radius:999px}
-      table{width:100%; border-collapse:collapse}
-      th, td{border-bottom:1px solid #1f2937; padding:10px; text-align:left}
-      .calendar{display:grid; grid-template-columns:repeat(7,1fr); gap:8px}
-      .day{padding:10px; border:1px solid #334155; border-radius:10px; text-align:center; cursor:pointer; background:#0b1220}
-      .day.muted{opacity:.25}
-      .day.inactive{opacity:.45; border-color:#293241; color:#94a3b8}   /* gris = no activo */
-      .day.active{border-color:#3b82f6; background:rgba(59,130,246,.12)} /* azul = activo */
-      .day.today{outline:2px solid #22c55e; outline-offset:2px} 
-      .slots{display:flex; flex-wrap:wrap; gap:8px; margin-top:10px}
-      .slot{padding:8px 10px; border:1px solid #334155; border-radius:10px; cursor:pointer}
-      .slot.free{border-color:#22c55e}
-      .header{display:flex; align-items:center; justify-content:space-between; margin-bottom:16px}
+      :root {
+        --primary: #2563eb;
+        --bg: #0b1220;
+        --card: #0f172a;
+        --muted: #94a3b8;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu,
+          Cantarell, Noto Sans, Arial;
+        background: var(--bg);
+        color: #e5e7eb;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .container {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid #1f2937;
+        border-radius: 14px;
+        padding: 16px;
+        width: 100%;
+        overflow: hidden;
+      }
+      .btn {
+        padding: 10px 14px;
+        border-radius: 10px;
+        border: 1px solid #334155;
+        background: #1f2937;
+        color: #e5e7eb;
+        cursor: pointer;
+      }
+      .btn.primary {
+        background: var(--primary);
+        border-color: #1d4ed8;
+      }
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      input,
+      select {
+        width: 100%;
+        padding: 10px;
+        border-radius: 10px;
+        border: 1px solid #334155;
+        background: #0b1220;
+        color: #e5e7eb;
+      }
+      label {
+        display: block;
+        margin: 10px 0 6px;
+      }
+
+      /* Layout responsivo de dos columnas sin solapes */
+      .row {
+        display: grid;
+        gap: 16px;
+      }
+      @media (min-width: 900px) {
+        .row {
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        }
+      }
+
+      .nav {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .pill {
+        padding: 6px 10px;
+        border: 1px solid #334155;
+        border-radius: 999px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        border-bottom: 1px solid #1f2937;
+        padding: 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+      .table-wrap {
+        width: 100%;
+        overflow-x: auto;
+      }
+
+      /* Calendario */
+      .calendar {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .dow {
+        opacity: 0.6;
+        text-align: center;
+        font-size: 12px;
+      }
+
+      /* Asegura que nada se salga del cuadro del día */
+      .day {
+        position: relative;
+        overflow: hidden; /* 👈 importante */
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid #334155;
+        border-radius: 10px;
+        background: #0b1220;
+        cursor: pointer;
+        aspect-ratio: 1 / 1;
+        padding: 8px;
+      }
+
+      /* Número del día, esquina superior izquierda */
+      .day .num {
+        position: absolute;
+        top: 6px;
+        left: 8px;
+        font-size: 12px;
+        opacity: 0.9;
+        pointer-events: none;
+      }
+
+      /* Día cerrado: solo borde rojo + leve fondo rojizo */
+      .day.closed {
+        border-color: #ef4444;
+        background: linear-gradient(
+          0deg,
+          rgba(239, 68, 68, 0.1),
+          rgba(239, 68, 68, 0.1)
+        );
+      }
+
+      /* Etiqueta HORIZONTAL “CERRADO”, dentro y sin tapar el número */
+      .day.closed::after {
+        content: "CERRADO";
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%); /* centrada */
+        bottom: 6px; /* zona baja para no cubrir la cabecera/número */
+        background: #ef4444;
+        color: #fff;
+        font-size: 9px; /* tamaño pequeño */
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        padding: 2px 8px; /* pill compacto */
+        border-radius: 6px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+        pointer-events: none; /* no bloquea clics */
+        z-index: 2;
+      }
+
+      /* Opcionales (por consistencia con tu paleta) */
+      .day.active {
+        border-color: #3b82f6;
+        background: rgba(59, 130, 246, 0.1);
+      }
+      .day.inactive {
+        border-color: #293241;
+        color: #94a3b8;
+        background: #0b1220;
+        opacity: 0.7;
+      }
+      .day.today {
+        outline: 2px solid #22c55e;
+        outline-offset: 2px;
+      }
+
+      /* Lista de slots: que no se solape y haga wrap limpio */
+      .slots {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .slot {
+        padding: 8px 10px;
+        border: 1px solid #334155;
+        border-radius: 10px;
+        cursor: pointer;
+      }
+      .slot.free {
+        border-color: #22c55e;
+      }
     </style>
   </head>
   <body>

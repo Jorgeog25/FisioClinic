@@ -137,7 +137,7 @@ export default function AdminHome() {
         <div className="row">
           <div className="card">
             <h3>Calendario</h3>
-            <MonthCalendar onPickDay={pickDay} />
+            <MonthCalendar onPickDay={pickDay} adminMode={true} />
             {date && (
               <div
                 style={{

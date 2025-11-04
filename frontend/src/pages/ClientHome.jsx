@@ -47,7 +47,7 @@ export default function ClientHome() {
     <div className="row">
       <div className="card">
         <h3>Pedir cita</h3>
-        <MonthCalendar onPickDay={fetchSlots} />
+        <MonthCalendar onPickDay={fetchSlots} adminMode={false} />
         {pickedDate && (
           <p>
             Día seleccionado: <strong>{pickedDate}</strong>
