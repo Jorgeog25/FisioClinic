@@ -1,50 +1,59 @@
 const Appointment = require('../models/Appointment');
 const Availability = require('../models/Availability');
 
-exports.book = async (req, res, next) => {
+// POST /api/appointments  (cliente crea su cita)
+exports.create = async (req, res, next) => {
   try {
-    const { clientId, date, time } = req.body;
-    const day = await Availability.findOne({ date, isActive: true });
-    if (!day) return res.status(400).json({ error: 'Día no activo' });
+    const { date, time } = req.body;
+    const clientId = req.user?.clientId;
 
-    // Avoid double booking
+    if (!clientId) {
+      return res.status(400).json({ error: 'No se ha encontrado el cliente asociado al usuario.' });
+    }
+    if (!date || !time) {
+      return res.status(400).json({ error: 'Faltan campos: date y time son obligatorios.' });
+    }
+
+    // (Opcional) Bloqueo de días pasados en servidor
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const [y,m,d] = date.split('-').map(Number);
+    const picked = new Date(y, m-1, d);
+    if (picked < today) {
+      return res.status(400).json({ error: 'No se puede reservar en días pasados.' });
+    }
+
+    // Validar que el día está activo y la hora cae dentro del rango
+    const day = await Availability.findOne({ date });
+    if (!day || !day.isActive) {
+      return res.status(400).json({ error: 'Ese día no está disponible.' });
+    }
+    // Comprueba que la hora está dentro del rango del día
+    const within =
+      time >= day.startTime &&
+      time <  day.endTime;
+    if (!within) {
+      return res.status(400).json({ error: 'Hora fuera del horario disponible.' });
+    }
+
+    // Evitar doble reserva en esa franja para ese día
     const exists = await Appointment.findOne({ date, time });
-    if (exists) return res.status(409).json({ error: 'Hora ya reservada' });
+    if (exists) {
+      return res.status(409).json({ error: 'Esa hora ya está reservada.' });
+    }
 
-    const appt = await Appointment.create({ clientId, date, time, durationMinutes: day.slotMinutes });
+    const appt = await Appointment.create({
+      date,
+      time,
+      clientId,          // 👈 CLAVE: asociar el cliente
+      status: 'booked'
+    });
+
     res.status(201).json(appt);
-  } catch (e) { 
-    if (e.code === 11000) return res.status(409).json({ error: 'Ranura ya ocupada' });
-    next(e); 
-  }
-};
-
-exports.listByDate = async (req, res, next) => {
-  try {
-    const { date } = req.query;
-    const filter = date ? { date } : {};
-    const appts = await Appointment.find(filter).sort({ date: 1, time: 1 });
-    res.json(appts);
   } catch (e) { next(e); }
 };
 
-exports.my = async (req, res, next) => {
-  try {
-    const clientId = req.user.clientId;
-    const appts = await Appointment.find({ clientId }).sort({ date: -1, time: -1 });
-    res.json(appts);
-  } catch (e) { next(e); }
-};
-
-exports.updateStatus = async (req, res, next) => {
-  try {
-    const { status, notes } = req.body;
-    const appt = await Appointment.findByIdAndUpdate(req.params.id, { status, notes }, { new: true });
-    if (!appt) return res.status(404).json({ error: 'Cita no encontrada' });
-    res.json(appt);
-  } catch (e) { next(e); }
-};
-
+// GET /api/appointments?date=YYYY-MM-DD  (admin ve citas del día)
 exports.listByDate = async (req, res, next) => {
   try {
     const { date } = req.query;
@@ -56,6 +65,7 @@ exports.listByDate = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
+// GET /api/appointments/me  (cliente ve su historial)
 exports.my = async (req, res, next) => {
   try {
     const clientId = req.user.clientId;

@@ -1,30 +1,27 @@
+// backend/src/middleware/auth.js
 const jwt = require('jsonwebtoken');
 
-function auth(required = true) {
-  return (req, res, next) => {
-    const header = req.headers.authorization || '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-    if (!token) {
-      if (required) return res.status(401).json({ error: 'No token' });
-      req.user = null;
-      return next();
-    }
-    try {
-      const payload = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = payload;
-      next();
-    } catch (e) {
-      return res.status(401).json({ error: 'Invalid token' });
-    }
-  };
-}
+exports.auth = (required = false) => (req, res, next) => {
+  const hdr = req.headers.authorization || '';
+  const token = hdr.startsWith('Bearer ') ? hdr.slice(7) : null;
 
-function requireRole(role) {
-  return (req, res, next) => {
-    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
-    if (req.user.role !== role) return res.status(403).json({ error: 'Forbidden' });
+  if (!token) {
+    if (required) return res.status(401).json({ error: 'No autenticado' });
+    req.user = null; return next();
+  }
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    // payload debe tener: id, role, email, clientId (así los firmamos en auth.controller)
+    req.user = payload;
     next();
-  };
-}
+  } catch {
+    return res.status(401).json({ error: 'Token inválido' });
+  }
+};
 
-module.exports = { auth, requireRole };
+exports.requireRole = (...roles) => (req, res, next) => {
+  if (!req.user || !roles.includes(req.user.role)) {
+    return res.status(403).json({ error: 'No autorizado' });
+  }
+  next();
+};

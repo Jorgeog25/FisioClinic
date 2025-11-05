@@ -1,66 +1,84 @@
-import React from 'react'
-import { Routes, Route, Link, useNavigate, Navigate } from 'react-router-dom'
+import React, { useEffect } from 'react'
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import Login from './pages/Login'
 import ClientHome from './pages/ClientHome'
 import AdminHome from './pages/AdminHome'
-import { clearAuth, getUser } from './api'
-import Register from './pages/Register'   
+import { getUser, clearAuth, touchActivity, lastActivity } from './api'
 
-function Nav() {
-  const user = getUser()
-  const nav = useNavigate()
-  return (
-    <div className="container">
-      <div className="header">
-        <h2>Fisio Clinic</h2>
-        <div className="nav">
-          {user?.role === 'admin' && <Link className="pill" to="/admin">Admin</Link>}
-          {user?.role === 'client' && <Link className="pill" to="/client">Mi área</Link>}
-          {!user && <Link className="pill" to="/login">Login</Link>}
-          {user && <button className="btn" onClick={()=>{clearAuth(); nav('/login')}}>Salir</button>}
-        </div>
-      </div>
-    </div>
-  )
-}
+const IDLE_MS = 5 * 60 * 1000 // 5 minutos
 
 function Protected({ children, role }) {
   const user = getUser()
-  if (!user) return <Navigate to="/login" replace />
+  if (!user) return <Navigate to="/" replace />
   if (role && user.role !== role) return <Navigate to="/" replace />
   return children
 }
 
-export default function App(){
-  return (
-    <>
-      <Nav/>
-      <div className="container">
-        <Routes>
-          <Route path="/" element={<Home/>} />
-          <Route path="/register" element={<Register/>} />
-          <Route path="/login" element={<Login/>} />
-          <Route path="/client" element={<Protected role="client"><ClientHome/></Protected>} />
-          <Route path="/admin" element={<Protected role="admin"><AdminHome/></Protected>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </div>
-    </>
-  )
-}
+export default function App() {
+  const nav = useNavigate()
 
-function Home(){
-  const user = getUser()
+  // Al montar: si hay usuario en esta pestaña, redirige; si no, deja en login
+  useEffect(() => {
+    const u = getUser()
+    if (u) {
+      nav(u.role === 'admin' ? '/admin' : '/client', { replace: true })
+    }
+  }, [])
+
+  // Watchdog de inactividad (5 min) + listeners de actividad
+  useEffect(() => {
+    const bump = () => touchActivity()
+    // registra actividad del usuario
+    window.addEventListener('click', bump)
+    window.addEventListener('keydown', bump)
+    window.addEventListener('mousemove', bump)
+    window.addEventListener('touchstart', bump)
+    window.addEventListener('scroll', bump, { passive: true })
+
+    // inicia contador ahora
+    touchActivity()
+
+    const t = setInterval(() => {
+      const ts = lastActivity()
+      if (!ts) return
+      if (Date.now() - ts > IDLE_MS) {
+        clearInterval(t)
+        clearAuth()
+        nav('/', { replace: true })
+      }
+    }, 15 * 1000) // comprueba cada 15s
+
+    return () => {
+      window.removeEventListener('click', bump)
+      window.removeEventListener('keydown', bump)
+      window.removeEventListener('mousemove', bump)
+      window.removeEventListener('touchstart', bump)
+      window.removeEventListener('scroll', bump)
+      clearInterval(t)
+    }
+  }, [nav])
+
   return (
-    <div className="card">
-      <h3>Bienvenido a la clínica</h3>
-      <p>Accede para gestionar tus citas o la agenda de la clínica.</p>
-      <div className="nav">
-        {!user && <Link className="btn primary" to="/login">Entrar</Link>}
-        {user?.role === 'client' && <Link className="btn primary" to="/client">Ir a mi área</Link>}
-        {user?.role === 'admin' && <Link className="btn primary" to="/admin">Ir a Admin</Link>}
-        {!user && <Link className="btn" to="/register">Crear cuenta</Link>}
-      </div>
+    <div className="container">
+      <Routes>
+        {/* Login como raíz */}
+        <Route path="/" element={<Login />} />
+
+        {/* Cliente */}
+        <Route
+          path="/client"
+          element={<Protected role="client"><ClientHome/></Protected>}
+        />
+
+        {/* Admin */}
+        <Route
+          path="/admin"
+          element={<Protected role="admin"><AdminHome/></Protected>}
+        />
+
+        {/* Cualquier otra ruta => login */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </div>
   )
 }

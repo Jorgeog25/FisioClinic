@@ -15,18 +15,19 @@
       * {
         box-sizing: border-box;
       }
-      html,
-      body {
-        height: 100%;
-      }
       body {
         margin: 0;
         font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu,
           Cantarell, Noto Sans, Arial;
-        background: var(--bg);
+        background: radial-gradient(
+            1200px 600px at 20% -10%,
+            #1e293b 0%,
+            transparent 60%
+          ),
+          radial-gradient(1000px 600px at 100% 0%, #0b1220 0%, transparent 50%),
+          #070b14;
         color: #e5e7eb;
       }
-
       a {
         color: inherit;
         text-decoration: none;
@@ -37,6 +38,7 @@
         margin: 0 auto;
         padding: 20px;
       }
+
       .header {
         display: flex;
         align-items: center;
@@ -54,28 +56,31 @@
         width: 100%;
         overflow: hidden;
       }
+
+      /* Buttons & inputs */
       .btn {
         padding: 10px 14px;
-        border-radius: 10px;
+        border-radius: 12px;
         border: 1px solid #334155;
         background: #1f2937;
         color: #e5e7eb;
         cursor: pointer;
+        transition: 0.2s;
+      }
+      .btn:hover {
+        transform: translateY(-1px);
       }
       .btn.primary {
         background: var(--primary);
         border-color: #1d4ed8;
       }
-      .btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
-
-      input,
-      select {
+      .btn.full {
         width: 100%;
-        padding: 10px;
-        border-radius: 10px;
+      }
+      input {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: 12px;
         border: 1px solid #334155;
         background: #0b1220;
         color: #e5e7eb;
@@ -85,7 +90,7 @@
         margin: 10px 0 6px;
       }
 
-      /* Layout responsivo de dos columnas sin solapes */
+      /* Layout 2 columnas responsive */
       .row {
         display: grid;
         gap: 16px;
@@ -107,6 +112,7 @@
         border-radius: 999px;
       }
 
+      /* Tablas */
       table {
         width: 100%;
         border-collapse: collapse;
@@ -123,7 +129,54 @@
         overflow-x: auto;
       }
 
-      /* Calendario */
+      /* ===== LOGIN como pantalla inicial ===== */
+      .login-wrap {
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+        padding: 20px;
+      }
+      .login-card {
+        width: 100%;
+        max-width: 480px;
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid #1f2937;
+        border-radius: 18px;
+        padding: 28px;
+        box-shadow: 0 20px 80px rgba(0, 0, 0, 0.35);
+        backdrop-filter: blur(6px);
+      }
+      .brand {
+        margin: 0 0 6px;
+        font-size: 28px;
+      }
+      .subtitle {
+        margin: 0 0 18px;
+        color: #9aa4b2;
+      }
+      .form label {
+        color: #cbd5e1;
+      }
+      .error {
+        color: #fca5a5;
+        margin: 10px 0 0;
+      }
+      .cta-register {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 16px;
+        padding-top: 14px;
+        border-top: 1px dashed #263246;
+      }
+      .btn.cta {
+        background: linear-gradient(90deg, #06b6d4, #3b82f6);
+        border-color: #1d4ed8;
+        font-weight: 700;
+      }
+
+      /* ===== Calendario ===== */
       .calendar {
         display: grid;
         grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -135,10 +188,9 @@
         font-size: 12px;
       }
 
-      /* Asegura que nada se salga del cuadro del día */
       .day {
         position: relative;
-        overflow: hidden; /* 👈 importante */
+        overflow: hidden;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -149,8 +201,6 @@
         aspect-ratio: 1 / 1;
         padding: 8px;
       }
-
-      /* Número del día, esquina superior izquierda */
       .day .num {
         position: absolute;
         top: 6px;
@@ -160,36 +210,6 @@
         pointer-events: none;
       }
 
-      /* Día cerrado: solo borde rojo + leve fondo rojizo */
-      .day.closed {
-        border-color: #ef4444;
-        background: linear-gradient(
-          0deg,
-          rgba(239, 68, 68, 0.1),
-          rgba(239, 68, 68, 0.1)
-        );
-      }
-
-      /* Etiqueta HORIZONTAL “CERRADO”, dentro y sin tapar el número */
-      .day.closed::after {
-        content: "CERRADO";
-        position: absolute;
-        left: 50%;
-        transform: translateX(-50%); /* centrada */
-        bottom: 6px; /* zona baja para no cubrir la cabecera/número */
-        background: #ef4444;
-        color: #fff;
-        font-size: 9px; /* tamaño pequeño */
-        font-weight: 700;
-        letter-spacing: 0.3px;
-        padding: 2px 8px; /* pill compacto */
-        border-radius: 6px;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-        pointer-events: none; /* no bloquea clics */
-        z-index: 2;
-      }
-
-      /* Opcionales (por consistencia con tu paleta) */
       .day.active {
         border-color: #3b82f6;
         background: rgba(59, 130, 246, 0.1);
@@ -205,7 +225,32 @@
         outline-offset: 2px;
       }
 
-      /* Lista de slots: que no se solape y haga wrap limpio */
+      .day.closed {
+        border-color: #ef4444;
+        background: linear-gradient(
+          0deg,
+          rgba(239, 68, 68, 0.1),
+          rgba(239, 68, 68, 0.1)
+        );
+      }
+      .day.closed::after {
+        content: "CERRADO";
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: 6px;
+        background: #ef4444;
+        color: #fff;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        padding: 2px 8px;
+        border-radius: 6px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+        pointer-events: none;
+        z-index: 2;
+      }
+
       .slots {
         display: flex;
         flex-wrap: wrap;
@@ -220,6 +265,40 @@
       }
       .slot.free {
         border-color: #22c55e;
+      }
+
+      /* ===== Botón de SALIR flotante ===== */
+      .logout-box {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 50;
+        background: linear-gradient(135deg, #ef4444, #dc2626);
+        border: 2px solid #991b1b;
+        border-radius: 14px;
+        color: #fff;
+        font-weight: 700;
+        padding: 14px 20px;
+        cursor: pointer;
+        box-shadow: 0 4px 20px rgba(239, 68, 68, 0.5);
+        transition: all 0.2s ease;
+      }
+      .logout-box:hover {
+        background: linear-gradient(135deg, #f87171, #dc2626);
+        transform: translateY(-2px);
+        box-shadow: 0 6px 24px rgba(239, 68, 68, 0.65);
+      }
+      .logout-box span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 15px;
+        letter-spacing: 0.4px;
+      }
+      .logout-box svg {
+        width: 16px;
+        height: 16px;
+        fill: #fff;
       }
     </style>
   </head>
