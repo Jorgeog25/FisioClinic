@@ -10,10 +10,10 @@ function ymdLocal(date){
 }
 function ymdNum(ymd){ return Number(ymd.replaceAll('-', '')) }
 
-export default function MonthCalendar({ onPickDay, adminMode=false }){
+export default function MonthCalendar({ onPickDay, adminMode=false, reloadToken=0, onDayMutated }) {
   const [monthStart, setMonthStart] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
   const [activeDays, setActiveDays] = useState({})
-  const [pastWithAppts, setPastWithAppts] = useState({}) // 👈 días con citas
+  const [pastWithAppts, setPastWithAppts] = useState({}) // días pasados con citas
 
   const year = monthStart.getFullYear()
   const month = monthStart.getMonth()
@@ -30,18 +30,17 @@ export default function MonthCalendar({ onPickDay, adminMode=false }){
     return cells
   }, [year, month])
 
+  // Carga disponibilidad + resumen de citas (admin) cada vez que cambie mes o reloadToken
   useEffect(()=>{
     const from = ymdLocal(new Date(year, month, 1))
     const to = ymdLocal(new Date(year, month+1, 0))
 
-    // disponibilidad (activos) para todo el mes
     api.listAvailability(from, to).then(days=>{
       const map = {}
-      days.forEach(d => { if (d.isActive) map[d.date] = true })
+      ;(days||[]).forEach(d => { if (d.isActive) map[d.date] = true })
       setActiveDays(map)
-    }).catch(()=>{})
+    }).catch(()=>setActiveDays({}))
 
-    // resumen de citas del mes (solo admin) para pintar granate días pasados con citas
     if (adminMode) {
       api.appointmentsSummary(from, to).then(map=>{
         setPastWithAppts(map || {})
@@ -49,13 +48,18 @@ export default function MonthCalendar({ onPickDay, adminMode=false }){
     } else {
       setPastWithAppts({})
     }
-  }, [year, month, adminMode])
+  }, [year, month, adminMode, reloadToken])
+
+  // Permite que el padre marque/unmarque un día sin recargar todo
+  useEffect(()=>{
+    if (!onDayMutated) return
+    // el padre pasará una función para mutar; aquí nada
+  }, [onDayMutated])
 
   const todayStr = ymdLocal(new Date())
   const todayNum = ymdNum(todayStr)
 
   function handlePick(key, isPast){
-    // Clientes: no permitir días pasados. Admin: sí, para ver citas.
     if (isPast && !adminMode) return;
     onPickDay && onPickDay(key, { isPast })
   }
@@ -77,12 +81,8 @@ export default function MonthCalendar({ onPickDay, adminMode=false }){
           const isActive = !!activeDays[key]
           const isToday  = key === todayStr
           const isPast   = ymdNum(key) < todayNum
-          const hadAppts = isPast && pastWithAppts[key] > 0  // 👈 citas ese día
+          const hadAppts = isPast && pastWithAppts[key] > 0
 
-          // PRIORIDAD de clases:
-          // 1) Pasado con citas => granate
-          // 2) Pasado sin citas => cerrado (rojo)
-          // 3) Futuro/actual => active/inactive normal
           let cls = 'day'
           if (hadAppts)           cls += ' past-appts'
           else if (isPast)        cls += ' closed'
@@ -100,19 +100,12 @@ export default function MonthCalendar({ onPickDay, adminMode=false }){
               className={cls}
               title={title}
               onClick={()=>handlePick(key, isPast)}
+              data-day={key}
             >
               <span className="num">{d.getDate()}</span>
             </div>
           )
         })}
-      </div>
-
-      <div style={{marginTop:10, fontSize:12, opacity:.8}}>
-        <span className="pill" style={{marginRight:8}}>● Azul = activo</span>
-        <span className="pill" style={{marginRight:8}}>● Verde = hoy</span>
-        <span className="pill" style={{marginRight:8}}>● Gris = no activo</span>
-        <span className="pill" style={{marginRight:8}}>● Rojo = cerrado (pasado)</span>
-        <span className="pill">● Granate = pasado con citas</span>
       </div>
     </div>
   )

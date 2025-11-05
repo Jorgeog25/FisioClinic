@@ -3,21 +3,77 @@ import { useNavigate } from "react-router-dom";
 import MonthCalendar from "../components/MonthCalendar";
 import { api, clearAuth } from "../api";
 
+/** Utils tiempo */
+function toMinutes(hhmm) {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+}
+function toHHMM(min) {
+  const h = Math.floor(min / 60),
+    m = min % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/** Genera slots SOLO dentro del rango [start,end) con paso slotMinutes.
+ * Solo añade los que CABEN COMPLETOS dentro del rango (start + slotMinutes <= end).
+ */
+function buildSlotsInRange(
+  start,
+  end,
+  slotMinutes,
+  apptsTimes = [],
+  blocked = []
+) {
+  const out = [];
+  const apptSet = new Set(apptsTimes);
+  const blockedSet = new Set(blocked || []);
+  const S = toMinutes(start),
+    E = toMinutes(end);
+  const step = Math.max(5, Number(slotMinutes) || 60);
+
+  let t = S;
+  while (t + step <= E) {
+    const time = toHHMM(t);
+    const reserved = apptSet.has(time);
+    const blockedManual = !reserved && blockedSet.has(time);
+    out.push({
+      time,
+      reserved,
+      blocked: blockedManual,
+      // 🔧 slots reservados se marcan checked=true (y siguen disabled) para no disparar falsas alertas
+      checked: reserved ? true : !blockedManual,
+    });
+    t += step;
+  }
+  return out;
+}
+
 export default function AdminHome() {
   const nav = useNavigate();
 
+  // pestañas
   const [tab, setTab] = useState("calendar"); // 'calendar' | 'clients'
 
-  // CALENDARIO / DÍA
+  // selección de día
   const [date, setDate] = useState("");
   const [isPast, setIsPast] = useState(false);
+
+  // info del día
+  const [dayInfo, setDayInfo] = useState(null); // {date, startTime, endTime, slotMinutes, isActive, blockedSlots}
+  const [dayAppts, setDayAppts] = useState([]); // citas del día
+  const [appts, setAppts] = useState([]); // citas “ver citas del día”
+  const [loadingDay, setLoadingDay] = useState(false);
+
+  // editor (por rango)
   const [showDayForm, setShowDayForm] = useState(false);
-  const [startTime, setStartTime] = useState("09:00");
-  const [endTime, setEndTime] = useState("17:00");
   const [slotMinutes, setSlotMinutes] = useState(60);
-  const [isActive, setIsActive] = useState(true);
+  const [rangeStart, setRangeStart] = useState("09:00");
+  const [rangeEnd, setRangeEnd] = useState("17:00");
+  const [slots, setSlots] = useState([]);
   const [msg, setMsg] = useState("");
-  const [appts, setAppts] = useState([]);
+
+  // refrescar calendario
+  const [reloadToken, setReloadToken] = useState(0);
 
   // CLIENTES
   const [clients, setClients] = useState([]);
@@ -36,68 +92,229 @@ export default function AdminHome() {
   });
   const [savingEdit, setSavingEdit] = useState(false);
 
-  // Cerrar sesión
   function logout() {
     clearAuth();
     nav("/", { replace: true });
   }
 
-  // Cargar clientes
   useEffect(() => {
     if (tab === "clients") loadClients();
   }, [tab]);
   async function loadClients() {
     try {
-      const list = await api.listClients();
-      setClients(list);
+      setClients(await api.listClients());
     } catch (e) {
       console.error(e);
     }
   }
 
-  // Seleccionar día
-  function pickDay(d, meta = {}) {
+  // seleccionar día
+  async function pickDay(d, meta = {}) {
     setDate(d);
     setIsPast(!!meta.isPast);
     setMsg("");
     setAppts([]);
-    setShowDayForm(!meta.isPast); // Si es pasado, no se abre el formulario
+    setShowDayForm(false);
+    setSlots([]);
+    setLoadingDay(true);
+    try {
+      const rng = await api.listAvailability(d, d);
+      const info = Array.isArray(rng) ? rng.find((x) => x.date === d) : null;
+      setDayInfo(info || null);
+
+      const list = await api.listAppointments(d);
+      const apptsList = Array.isArray(list) ? list : [];
+      setDayAppts(apptsList);
+
+      // rango por defecto desde la disponibilidad guardada o 09:00–17:00
+      const start = info?.startTime || "09:00";
+      const end = info?.endTime || "17:00";
+      const step = info?.slotMinutes || 60;
+      setRangeStart(start);
+      setRangeEnd(end);
+      setSlotMinutes(step);
+
+      // normaliza horas de citas a HH:mm
+      const apptTimes = apptsList.map((a) => (a.time || "").slice(0, 5));
+      const blocked = info?.blockedSlots || [];
+      setSlots(buildSlotsInRange(start, end, step, apptTimes, blocked));
+    } catch (e) {
+      setDayInfo(null);
+      setDayAppts([]);
+      setSlots([]);
+    } finally {
+      setLoadingDay(false);
+    }
   }
 
-  async function saveDay(e) {
-    e.preventDefault();
-    setMsg("");
-    try {
-      await api.setAvailability({
-        date,
-        startTime,
-        endTime,
-        slotMinutes: Number(slotMinutes),
-        isActive,
-      });
-      setMsg("Día actualizado correctamente.");
-    } catch (e) {
-      setMsg(e.message);
-    }
+  function openFormForDay() {
+    if (isPast) return;
+    const info = dayInfo;
+    const start = info?.startTime || rangeStart;
+    const end = info?.endTime || rangeEnd;
+    const step = info?.slotMinutes || slotMinutes;
+    setRangeStart(start);
+    setRangeEnd(end);
+    setSlotMinutes(step);
+
+    const apptTimes = dayAppts.map((a) => (a.time || "").slice(0, 5));
+    const blocked = info?.blockedSlots || [];
+    setSlots(buildSlotsInRange(start, end, step, apptTimes, blocked));
+    setShowDayForm(true);
   }
 
   async function viewDayAppointments() {
+    if (!date) return;
     try {
       const list = await api.listAppointments(date);
-      setAppts(list);
+      setAppts(Array.isArray(list) ? list : []);
     } catch (e) {
       setMsg(e.message);
     }
   }
 
-  // CRUD clientes
+  // cambiar duración → regenerar dentro del rango
+  useEffect(() => {
+    if (!showDayForm) return;
+    const prev = new Map(slots.map((s) => [s.time, s.checked]));
+    const apptTimes = dayAppts.map((a) => (a.time || "").slice(0, 5));
+    const blocked = dayInfo?.blockedSlots || [];
+    const next = buildSlotsInRange(
+      rangeStart,
+      rangeEnd,
+      slotMinutes,
+      apptTimes,
+      blocked
+    );
+    setSlots(
+      next.map((s) => ({
+        ...s,
+        checked: s.reserved
+          ? true
+          : prev.has(s.time)
+          ? prev.get(s.time)
+          : !s.blocked, // 🔧
+      }))
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotMinutes]);
+
+  // cambiar el rango → regenerar cuadrícula
+  useEffect(() => {
+    if (!showDayForm) return;
+    if (toMinutes(rangeEnd) <= toMinutes(rangeStart)) return;
+    const prev = new Map(slots.map((s) => [s.time, s.checked]));
+    const apptTimes = dayAppts.map((a) => (a.time || "").slice(0, 5));
+    const blocked = dayInfo?.blockedSlots || [];
+    const next = buildSlotsInRange(
+      rangeStart,
+      rangeEnd,
+      slotMinutes,
+      apptTimes,
+      blocked
+    );
+    setSlots(
+      next.map((s) => ({
+        ...s,
+        checked: s.reserved
+          ? true
+          : prev.has(s.time)
+          ? prev.get(s.time)
+          : !s.blocked, // 🔧
+      }))
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rangeStart, rangeEnd]);
+
+  function toggleSlot(i) {
+    setSlots(
+      slots.map((s, idx) => {
+        if (idx !== i) return s;
+        if (s.reserved) return s; // no se puede tocar
+        return { ...s, checked: !s.checked };
+      })
+    );
+  }
+
+  // ==== Herramientas rápidas sobre el RANGO ====
+  function markAll(v) {
+    setSlots(slots.map((s) => (s.reserved ? s : { ...s, checked: v })));
+  }
+
+  // Guardar: horario = rango; activo si hay alguna franja marcada
+  async function saveDay(e) {
+    e.preventDefault();
+    if (!date) return;
+    setMsg("");
+
+    if (toMinutes(rangeEnd) <= toMinutes(rangeStart)) {
+      setMsg("El rango debe tener fin mayor que el inicio.");
+      return;
+    }
+
+    const checkedCount = slots.filter((s) => s.checked && !s.reserved).length;
+    const willBeActive = checkedCount > 0;
+
+    // No cerrar si hay citas
+    if (dayAppts.length > 0 && !willBeActive) {
+      alert(`No puedes cerrar ${date}: hay ${dayAppts.length} cita(s).`);
+      return;
+    }
+
+    // ❌ (quitado) No comprobamos reserved && !checked: los reservados están disabled y el backend protege.
+
+    // blockedSlots = todas las NO reservadas con checked=false
+    const blockedSlots = slots
+      .filter((s) => !s.reserved && !s.checked)
+      .map((s) => s.time);
+
+    try {
+      await api.setAvailability({
+        date,
+        startTime: rangeStart,
+        endTime: rangeEnd,
+        slotMinutes: Number(slotMinutes),
+        isActive: willBeActive,
+        blockedSlots,
+      });
+      setMsg("Día actualizado correctamente.");
+
+      // refresca datos del día
+      const rng = await api.listAvailability(date, date);
+      const info = Array.isArray(rng) ? rng.find((x) => x.date === date) : null;
+      setDayInfo(info || null);
+
+      const list = await api.listAppointments(date);
+      setDayAppts(Array.isArray(list) ? list : []);
+
+      // reconstruye slots con lo recién guardado
+      const apptTimes = (Array.isArray(list) ? list : []).map((a) =>
+        (a.time || "").slice(0, 5)
+      );
+      setSlots(
+        buildSlotsInRange(
+          rangeStart,
+          rangeEnd,
+          slotMinutes,
+          apptTimes,
+          blockedSlots
+        )
+      );
+
+      // 🔄 refresca calendario para ver el color del día
+      setReloadToken((t) => t + 1);
+    } catch (e) {
+      setMsg(e.message);
+    }
+  }
+
+  // ----- CRUD clientes (igual) -----
   async function createClient(e) {
     e.preventDefault();
     const c = await api.createClient(newClient);
     setClients([c, ...clients]);
     setNewClient({ firstName: "", lastName: "", phone: "", reason: "" });
   }
-
   function startEdit(c) {
     setEditingId(c._id);
     setEditForm({
@@ -124,7 +341,9 @@ export default function AdminHome() {
     }
   }
   async function removeClient(id) {
-    const ok = confirm("¿Seguro que deseas borrar este cliente?");
+    const ok = confirm(
+      "¿Seguro que deseas borrar este cliente? También se eliminarán sus citas y pagos."
+    );
     if (!ok) return;
     try {
       await api.deleteClient(id);
@@ -134,12 +353,15 @@ export default function AdminHome() {
     }
   }
 
+  const hasInfo = !!dayInfo;
+  const activePreview = slots.some((s) => s.checked && !s.reserved);
+
   return (
     <>
-      {/* 🔴 Botón de cerrar sesión flotante */}
+      {/* 🔴 Cerrar sesión */}
       <div className="logout-box" onClick={logout}>
         <span>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+          <svg xmlns="http://www3.org/2000/svg" viewBox="0 0 24 24">
             <path
               d="M16 13v-2H7V8l-5 4 5 4v-3h9zm3-10H5c-1.1 0-2 .9-2 
             2v6h2V5h14v14H5v-6H3v6c0 1.1.9 2 2 
@@ -150,7 +372,7 @@ export default function AdminHome() {
         </span>
       </div>
 
-      {/* 🔹 Pestañas principales */}
+      {/* Pestañas */}
       <div className="nav" style={{ marginTop: 8 }}>
         <button
           className={`btn ${tab === "calendar" ? "primary" : ""}`}
@@ -171,7 +393,11 @@ export default function AdminHome() {
         <div className="row">
           <div className="card">
             <h3>Calendario</h3>
-            <MonthCalendar onPickDay={pickDay} adminMode={true} />
+            <MonthCalendar
+              onPickDay={pickDay}
+              adminMode={true}
+              reloadToken={reloadToken}
+            />
 
             {date && (
               <div
@@ -185,19 +411,25 @@ export default function AdminHome() {
               >
                 <span>
                   Día seleccionado: <strong>{date}</strong>
+                  {loadingDay ? " …" : ""}
                 </span>
                 <button className="btn" onClick={viewDayAppointments}>
-                  Ver citas del día
+                  Ver citas del día {loadingDay ? "" : `(${dayAppts.length})`}
                 </button>
 
-                {/* Solo editar días futuros o de hoy */}
                 {!isPast && (
-                  <button
-                    className="btn"
-                    onClick={() => setShowDayForm((v) => !v)}
-                  >
-                    {showDayForm ? "Cerrar día" : "Abrir día"}
-                  </button>
+                  <>
+                    {!hasInfo && (
+                      <button className="btn" onClick={openFormForDay}>
+                        Configurar día
+                      </button>
+                    )}
+                    {hasInfo && (
+                      <button className="btn" onClick={openFormForDay}>
+                        Editar día
+                      </button>
+                    )}
+                  </>
                 )}
 
                 {isPast && (
@@ -208,7 +440,6 @@ export default function AdminHome() {
               </div>
             )}
 
-            {/* Mostrar citas */}
             {appts.length > 0 && (
               <div style={{ marginTop: 12 }}>
                 <h4>Citas {date}</h4>
@@ -224,7 +455,7 @@ export default function AdminHome() {
                   <tbody>
                     {appts.map((a) => (
                       <tr key={a._id}>
-                        <td>{a.time}</td>
+                        <td>{(a.time || "").slice(0, 5)}</td>
                         <td>
                           {a.clientId
                             ? `${a.clientId.firstName} ${a.clientId.lastName}`
@@ -240,50 +471,157 @@ export default function AdminHome() {
             )}
           </div>
 
-          {/* Formulario de configuración (solo si no es pasado) */}
+          {/* ======== EDITOR POR RANGO ======== */}
           {showDayForm && !isPast && (
             <div className="card">
-              <h3>Configurar día: {date || "—"}</h3>
+              <h3 style={{ marginBottom: 8 }}>
+                {hasInfo ? "Editar día" : "Configurar día"}: {date || "—"}
+              </h3>
+
               <form onSubmit={saveDay}>
                 <div className="row">
                   <div>
                     <label>Inicio</label>
                     <input
                       type="time"
-                      value={startTime}
-                      onChange={(e) => setStartTime(e.target.value)}
+                      value={rangeStart}
+                      onChange={(e) => setRangeStart(e.target.value)}
                     />
                   </div>
                   <div>
                     <label>Fin</label>
                     <input
                       type="time"
-                      value={endTime}
-                      onChange={(e) => setEndTime(e.target.value)}
+                      value={rangeEnd}
+                      onChange={(e) => setRangeEnd(e.target.value)}
                     />
                   </div>
                 </div>
+
                 <div className="row">
                   <div>
                     <label>Duración (min)</label>
                     <input
                       type="number"
                       value={slotMinutes}
+                      min={5}
+                      step={5}
                       onChange={(e) => setSlotMinutes(e.target.value)}
                     />
+                    <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                      {[15, 30, 45, 60].map((n) => (
+                        <button
+                          type="button"
+                          className="btn"
+                          key={n}
+                          onClick={() => setSlotMinutes(n)}
+                        >
+                          {n} min
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div>
-                    <label>Activo</label>
-                    <select
-                      value={isActive ? "1" : "0"}
-                      onChange={(e) => setIsActive(e.target.value === "1")}
-                    >
-                      <option value="1">Sí</option>
-                      <option value="0">No</option>
-                    </select>
+                    <label>Estado del día</label>
+                    <div className="pill" style={{ padding: "10px 12px" }}>
+                      {activePreview
+                        ? "Activo (hay franjas marcadas)"
+                        : "CERRADO (sin franjas marcadas)"}
+                    </div>
                   </div>
                 </div>
-                <button className="btn primary" disabled={!date}>
+
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => markAll(true)}
+                    >
+                      Marcar todo (en rango)
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => markAll(false)}
+                    >
+                      Bloquear todo (en rango)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Slots del rango */}
+                <div style={{ marginTop: 14 }}>
+                  <h4 style={{ marginBottom: 8 }}>
+                    Franjas {rangeStart}–{rangeEnd}
+                  </h4>
+                  <div className="slots" style={{ gap: 10 }}>
+                    {slots.length === 0 && (
+                      <p style={{ opacity: 0.7 }}>
+                        No hay franjas que quepan con esta duración.
+                      </p>
+                    )}
+                    {slots.map((s, i) => (
+                      <label
+                        key={s.time}
+                        className="slot"
+                        title={
+                          s.reserved
+                            ? "Hora reservada"
+                            : s.checked
+                            ? "Disponible"
+                            : "Bloqueada"
+                        }
+                        style={{
+                          borderColor: s.reserved
+                            ? "#f97316"
+                            : s.checked
+                            ? "#22c55e"
+                            : "#64748b",
+                          background: s.reserved
+                            ? "rgba(249,115,22,.12)"
+                            : s.checked
+                            ? "rgba(34,197,94,.10)"
+                            : "rgba(100,116,139,.10)",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={s.checked}
+                          onChange={() => toggleSlot(i)}
+                          disabled={s.reserved}
+                        />
+                        <span style={{ minWidth: 56, display: "inline-block" }}>
+                          {s.time}
+                        </span>
+                        {s.reserved && (
+                          <span style={{ fontSize: 12, color: "#f59e0b" }}>
+                            ⛔ Hora reservada
+                          </span>
+                        )}
+                        {!s.reserved && !s.checked && (
+                          <span style={{ fontSize: 12, opacity: 0.8 }}>
+                            🚫 Bloqueada
+                          </span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                  <p style={{ marginTop: 8, opacity: 0.85 }}>
+                    Marca las horas que estarán disponibles. Sólo se generan
+                    franjas que <strong>caben completas</strong> dentro del
+                    rango.
+                  </p>
+                </div>
+
+                <button
+                  className="btn primary"
+                  disabled={!date}
+                  style={{ marginTop: 10 }}
+                >
                   Guardar
                 </button>
                 {msg && <p style={{ marginTop: 8 }}>{msg}</p>}

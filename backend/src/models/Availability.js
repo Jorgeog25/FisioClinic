@@ -1,14 +1,16 @@
-const mongoose = require('mongoose');
+// backend/src/models/Availability.js
+const mongoose = require("mongoose");
 
-// Each doc represents a working day with a start/end time and slot size.
-const AvailabilitySchema = new mongoose.Schema({
-  date: { type: String, required: true }, // 'YYYY-MM-DD' in clinic timezone
-  startTime: { type: String, required: true }, // 'HH:mm'
-  endTime: { type: String, required: true },   // 'HH:mm'
-  slotMinutes: { type: Number, default: 60 },  // 60 by default
-  isActive: { type: Boolean, default: true }
-}, { timestamps: true });
+const AvailabilitySchema = new mongoose.Schema(
+  {
+    date: { type: String, required: true, unique: true }, // 'YYYY-MM-DD'
+    startTime: { type: String, required: true }, // 'HH:mm'
+    endTime: { type: String, required: true }, // 'HH:mm'
+    slotMinutes: { type: Number, default: 60, min: 5, max: 240 },
+    isActive: { type: Boolean, default: true },
+    blockedSlots: { type: [String], default: [] }, // 'HH:mm'
+  },
+  { timestamps: true }
+);
 
-AvailabilitySchema.index({ date: 1 }, { unique: true });
-
-module.exports = mongoose.model('Availability', AvailabilitySchema);
+module.exports = mongoose.model("Availability", AvailabilitySchema);
