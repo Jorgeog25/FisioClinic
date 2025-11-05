@@ -250,6 +250,27 @@
         pointer-events: none;
         z-index: 2;
       }
+      .day.past-appts {
+        border-color: #7f1d1d; /* borde granate oscuro */
+        background: rgba(127, 29, 29, 0.2); /* fondo granate suave */
+      }
+      .day.past-appts::after {
+        content: "CITAS";
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: 6px;
+        background: #7f1d1d;
+        color: #fff;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        padding: 2px 8px;
+        border-radius: 6px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+        pointer-events: none;
+        z-index: 2;
+      }
 
       .slots {
         display: flex;

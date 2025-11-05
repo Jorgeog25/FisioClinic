@@ -75,3 +75,21 @@ exports.my = async (req, res, next) => {
     res.json(appts);
   } catch (e) { next(e); }
 };
+
+// GET /api/appointments/summary?from=YYYY-MM-DD&to=YYYY-MM-DD  (admin)
+exports.summary = async (req, res, next) => {
+  try {
+    const { from, to } = req.query;
+    const match = {};
+    if (from && to) match.date = { $gte: from, $lte: to };
+
+    const rows = await Appointment.aggregate([
+      { $match: match },
+      { $group: { _id: '$date', count: { $sum: 1 } } }
+    ]);
+
+    const map = {};
+    rows.forEach(r => { map[r._id] = r.count; });
+    res.json(map); // { "2025-11-03": 2, "2025-11-07": 1, ... }
+  } catch (e) { next(e); }
+};

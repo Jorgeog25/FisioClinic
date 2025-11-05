@@ -81,6 +81,7 @@ export const api = {
   listAppointments: (date) => request(`/appointments?date=${date}`),
   createAppointment: (payload) => request('/appointments', { method:'POST', body: payload }),
   myHistory: () => request('/appointments/me'),
+  appointmentsSummary: (from, to) => request(`/appointments/summary?from=${from}&to=${to}`),
 
   // clients
   listClients: () => request('/clients'),
