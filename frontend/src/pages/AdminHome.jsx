@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import MonthCalendar from "../components/MonthCalendar";
 import { api, clearAuth } from "../api";
 
-/** Utils tiempo */
+// ===== Utils =====
 function toMinutes(hhmm) {
   const [h, m] = hhmm.split(":").map(Number);
   return h * 60 + m;
@@ -13,10 +13,33 @@ function toHHMM(min) {
     m = min % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
+function fmtDDMMYYYY(ymd) {
+  if (!ymd) return "";
+  const [Y, M, D] = ymd.split("-");
+  return `${D}/${M}/${Y}`;
+}
+function todayYMD() {
+  return new Date().toISOString().slice(0, 10);
+}
+// normaliza texto (sin acentos, minúsculas)
+function norm(s) {
+  return (s ?? "")
+    .toString()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .trim();
+}
+// nombre del cliente desde la cita (tras normalización de api.js)
+function getClientName(a) {
+  const c = a?.clientId;
+  if (!c) return "";
+  const first = c.firstName || "";
+  const last = c.lastName || "";
+  return `${first} ${last}`.trim();
+}
 
-/** Genera slots SOLO dentro del rango [start,end) con paso slotMinutes.
- * Solo añade los que CABEN COMPLETOS dentro del rango (start + slotMinutes <= end).
- */
+// Genera slots dentro del rango que caben completos
 function buildSlotsInRange(
   start,
   end,
@@ -24,15 +47,13 @@ function buildSlotsInRange(
   apptsTimes = [],
   blocked = []
 ) {
-  const out = [];
-  const apptSet = new Set(apptsTimes);
-  const blockedSet = new Set(blocked || []);
+  const out = [],
+    apptSet = new Set(apptsTimes),
+    blockedSet = new Set(blocked || []);
   const S = toMinutes(start),
-    E = toMinutes(end);
-  const step = Math.max(5, Number(slotMinutes) || 60);
-
-  let t = S;
-  while (t + step <= E) {
+    E = toMinutes(end),
+    step = Math.max(5, Number(slotMinutes) || 60);
+  for (let t = S; t + step <= E; t += step) {
     const time = toHHMM(t);
     const reserved = apptSet.has(time);
     const blockedManual = !reserved && blockedSet.has(time);
@@ -40,30 +61,56 @@ function buildSlotsInRange(
       time,
       reserved,
       blocked: blockedManual,
-      // Reservadas: checked=true (pero disabled), para evitar falsos avisos
       checked: reserved ? true : !blockedManual,
     });
-    t += step;
   }
   return out;
+}
+
+// Normaliza estado visual en días pasados
+function computeDisplayStatus(status, isPast) {
+  const raw = (status || "").toString().trim().toLowerCase();
+  const isPaid = /paid|pagad/.test(raw);
+  const isCancelled = /cancel/.test(raw);
+  if (isPast && !isPaid && !isCancelled) return "pending_payment";
+  if (/pending|de pago/.test(raw)) return "pending_payment";
+  if (/proce/.test(raw)) return "in_process";
+  if (/reser/.test(raw)) return "reserved";
+  if (/paid|pagad/.test(raw)) return "paid";
+  if (/cancel/.test(raw)) return "cancelled";
+  return raw || "reserved";
+}
+
+// Badge de estado
+function StatusPill({ value, isPast }) {
+  const key = computeDisplayStatus(value, isPast);
+  const map = {
+    reserved: { label: "Reservada", cls: "badge badge-reserved" },
+    in_process: { label: "En proceso", cls: "badge badge-process" },
+    pending_payment: { label: "Pendiente de pago", cls: "badge badge-pending" },
+    paid: { label: "Pagada", cls: "badge badge-paid" },
+    cancelled: { label: "Cancelada", cls: "badge badge-cancel" },
+  };
+  const { label, cls } = map[key] || map.reserved;
+  return <span className={cls}>{label}</span>;
 }
 
 export default function AdminHome() {
   const nav = useNavigate();
 
-  // pestañas
+  // Pestañas
   const [tab, setTab] = useState("calendar");
 
-  // selección de día
+  // Día seleccionado
   const [date, setDate] = useState("");
   const [isPast, setIsPast] = useState(false);
 
-  // info del día
-  const [dayInfo, setDayInfo] = useState(null); // {date, startTime, endTime, slotMinutes, isActive, blockedSlots}
-  const [dayAppts, setDayAppts] = useState([]); // citas del día
+  // Info del día + citas
+  const [dayInfo, setDayInfo] = useState(null);
+  const [dayAppts, setDayAppts] = useState([]);
   const [loadingDay, setLoadingDay] = useState(false);
 
-  // editor (por rango)
+  // Editor de rango
   const [showDayForm, setShowDayForm] = useState(false);
   const [slotMinutes, setSlotMinutes] = useState(60);
   const [rangeStart, setRangeStart] = useState("09:00");
@@ -71,11 +118,12 @@ export default function AdminHome() {
   const [slots, setSlots] = useState([]);
   const [msg, setMsg] = useState("");
 
-  // refrescar calendario
+  // Refresco calendario
   const [reloadToken, setReloadToken] = useState(0);
 
-  // CLIENTES
+  // Clientes
   const [clients, setClients] = useState([]);
+  const [clientQuery, setClientQuery] = useState("");
   const [newClient, setNewClient] = useState({
     firstName: "",
     lastName: "",
@@ -91,14 +139,17 @@ export default function AdminHome() {
   });
   const [savingEdit, setSavingEdit] = useState(false);
 
-  function logout() {
-    clearAuth();
-    nav("/", { replace: true });
-  }
+  // Citas globales
+  const [apptsAll, setApptsAll] = useState([]);
+  const [personQuery, setPersonQuery] = useState("");
+  const [filterDay, setFilterDay] = useState("");
 
+  // Cargar datos según pestaña
   useEffect(() => {
     if (tab === "clients") loadClients();
+    if (tab === "appointments") loadApptsAll();
   }, [tab]);
+
   async function loadClients() {
     try {
       setClients(await api.listClients());
@@ -107,7 +158,23 @@ export default function AdminHome() {
     }
   }
 
-  // ===== Seleccionar día: ahora muestra citas + horario automáticamente
+  async function loadApptsAll() {
+    try {
+      // extremo amplio para traer todo
+      const rows = await api.appointmentsSummary("1970-01-01", "2100-12-31");
+      setApptsAll(Array.isArray(rows) ? rows : []);
+    } catch (e) {
+      console.error(e);
+      setApptsAll([]);
+    }
+  }
+
+  function logout() {
+    clearAuth();
+    nav("/", { replace: true });
+  }
+
+  // Seleccionar día en calendario
   async function pickDay(d, meta = {}) {
     setDate(d);
     setIsPast(!!meta.isPast);
@@ -116,17 +183,14 @@ export default function AdminHome() {
     setSlots([]);
     setLoadingDay(true);
     try {
-      // disponibilidad del día
       const rng = await api.listAvailability(d, d);
       const info = Array.isArray(rng) ? rng.find((x) => x.date === d) : null;
       setDayInfo(info || null);
 
-      // citas del día
       const list = await api.listAppointments(d);
       const apptsList = Array.isArray(list) ? list : [];
       setDayAppts(apptsList);
 
-      // rango por defecto (si no hay, 09:00–17:00 y 60min)
       const start = info?.startTime || "09:00";
       const end = info?.endTime || "17:00";
       const step = info?.slotMinutes || 60;
@@ -134,14 +198,11 @@ export default function AdminHome() {
       setRangeEnd(end);
       setSlotMinutes(step);
 
-      // normaliza horas de citas a HH:mm
       const apptTimes = apptsList.map((a) => (a.time || "").slice(0, 5));
       const blocked = info?.blockedSlots || [];
       setSlots(buildSlotsInRange(start, end, step, apptTimes, blocked));
-
-      // muestra el panel a la derecha SIEMPRE (si es pasado, será read-only)
       setShowDayForm(true);
-    } catch (e) {
+    } catch {
       setDayInfo(null);
       setDayAppts([]);
       setSlots([]);
@@ -150,24 +211,7 @@ export default function AdminHome() {
     }
   }
 
-  // abrir editor (sigue disponible por si lo llamas desde otro sitio)
-  function openFormForDay() {
-    if (isPast) return;
-    const info = dayInfo;
-    const start = info?.startTime || rangeStart;
-    const end = info?.endTime || rangeEnd;
-    const step = info?.slotMinutes || slotMinutes;
-    setRangeStart(start);
-    setRangeEnd(end);
-    setSlotMinutes(step);
-
-    const apptTimes = dayAppts.map((a) => (a.time || "").slice(0, 5));
-    const blocked = info?.blockedSlots || [];
-    setSlots(buildSlotsInRange(start, end, step, apptTimes, blocked));
-    setShowDayForm(true);
-  }
-
-  // regenerar slots al cambiar duración o rango
+  // Regenerar slots al cambiar duración o rango
   useEffect(() => {
     if (!showDayForm) return;
     const prev = new Map(slots.map((s) => [s.time, s.checked]));
@@ -221,24 +265,19 @@ export default function AdminHome() {
 
   function toggleSlot(i) {
     setSlots(
-      slots.map((s, idx) => {
-        if (idx !== i) return s;
-        if (s.reserved) return s; // no se puede tocar
-        return { ...s, checked: !s.checked };
-      })
+      slots.map((s, idx) =>
+        idx !== i ? s : s.reserved ? s : { ...s, checked: !s.checked }
+      )
     );
   }
-
   function markAll(v) {
     setSlots(slots.map((s) => (s.reserved ? s : { ...s, checked: v })));
   }
 
-  // Guardar: horario = rango; activo si hay alguna franja marcada (no reservada)
   async function saveDay(e) {
     e.preventDefault();
     if (!date) return;
     setMsg("");
-
     if (toMinutes(rangeEnd) <= toMinutes(rangeStart)) {
       setMsg("El rango debe tener fin mayor que el inicio.");
       return;
@@ -246,8 +285,6 @@ export default function AdminHome() {
 
     const checkedCount = slots.filter((s) => s.checked && !s.reserved).length;
     const willBeActive = checkedCount > 0;
-
-    // No cerrar si hay citas
     if (dayAppts.length > 0 && !willBeActive) {
       alert(`No puedes cerrar ${date}: hay ${dayAppts.length} cita(s).`);
       return;
@@ -256,7 +293,6 @@ export default function AdminHome() {
     const blockedSlots = slots
       .filter((s) => !s.reserved && !s.checked)
       .map((s) => s.time);
-
     try {
       await api.setAvailability({
         date,
@@ -267,101 +303,57 @@ export default function AdminHome() {
         blockedSlots,
       });
       setMsg("Día actualizado correctamente.");
-
-      // refresca datos del día
-      const rng = await api.listAvailability(date, date);
-      const info = Array.isArray(rng) ? rng.find((x) => x.date === date) : null;
-      setDayInfo(info || null);
-
-      const list = await api.listAppointments(date);
-      setDayAppts(Array.isArray(list) ? list : []);
-
-      // reconstruye slots con lo recién guardado
-      const apptTimes = (Array.isArray(list) ? list : []).map((a) =>
-        (a.time || "").slice(0, 5)
-      );
-      setSlots(
-        buildSlotsInRange(
-          rangeStart,
-          rangeEnd,
-          slotMinutes,
-          apptTimes,
-          blockedSlots
-        )
-      );
-
-      // 🔄 refresca calendario para ver el color del día
       setReloadToken((t) => t + 1);
     } catch (e) {
       setMsg(e.message);
     }
   }
 
-  // ----- CRUD clientes -----
-  async function createClient(e) {
-    e.preventDefault();
-    const c = await api.createClient(newClient);
-    setClients([c, ...clients]);
-    setNewClient({ firstName: "", lastName: "", phone: "", reason: "" });
-  }
-  function startEdit(c) {
-    setEditingId(c._id);
-    setEditForm({
-      firstName: c.firstName || "",
-      lastName: c.lastName || "",
-      phone: c.phone || "",
-      reason: c.reason || "",
+  // Filtrado de "Ver clientes"
+  const filteredClients = useMemo(() => {
+    const q = norm(clientQuery);
+    if (!q) return clients;
+    return clients.filter((c) => {
+      const full = norm(
+        `${c.firstName || ""} ${c.lastName || ""} ${c.phone || ""} ${
+          c.reason || ""
+        }`
+      );
+      return full.includes(q);
     });
-  }
-  function cancelEdit() {
-    setEditingId(null);
-    setEditForm({ firstName: "", lastName: "", phone: "", reason: "" });
-  }
-  async function saveEdit(id) {
-    setSavingEdit(true);
-    try {
-      const updated = await api.updateClient(id, editForm);
-      setClients(clients.map((c) => (c._id === id ? updated : c)));
-      cancelEdit();
-    } catch (e) {
-      alert(e.message);
-    } finally {
-      setSavingEdit(false);
-    }
-  }
-  async function removeClient(id) {
-    const ok = confirm(
-      "¿Seguro que deseas borrar este cliente? También se eliminarán sus citas y pagos."
-    );
-    if (!ok) return;
-    try {
-      await api.deleteClient(id);
-      setClients(clients.filter((c) => c._id !== id));
-    } catch (e) {
-      alert(e.message);
-    }
-  }
+  }, [clients, clientQuery]);
 
-  const hasInfo = !!dayInfo;
-  const activePreview = slots.some((s) => s.checked && !s.reserved);
+  // Filtrado de "Ver citas" (robusto)
+  const filteredAppts = useMemo(() => {
+    const q = norm(personQuery);
+    const d = (filterDay || "").trim(); // YYYY-MM-DD
+    const data = (apptsAll || []).filter((a) => {
+      if (q) {
+        const full = norm(getClientName(a));
+        if (!full.includes(q)) return false;
+      }
+      if (d && a?.date !== d) return false;
+      return true;
+    });
+    return data.sort((x, y) =>
+      `${x.date} ${x.time || ""}`.localeCompare(`${y.date} ${y.time || ""}`)
+    );
+  }, [apptsAll, personQuery, filterDay]);
 
   return (
     <>
-      {/* 🔴 Cerrar sesión */}
-      <div className="logout-box" onClick={logout}>
-        <span>
-          <svg xmlns="http://www3.org/2000/svg" viewBox="0 0 24 24">
-            <path
-              d="M16 13v-2H7V8l-5 4 5 4v-3h9zm3-10H5c-1.1 0-2 .9-2 
-            2v6h2V5h14v14H5v-6H3v6c0 1.1.9 2 2 
-            2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"
-            />
-          </svg>
-          Salir
-        </span>
+      {/* Salir */}
+      <div
+        className="logout-box"
+        onClick={() => {
+          clearAuth();
+          nav("/", { replace: true });
+        }}
+      >
+        <span>Salir</span>
       </div>
 
-      {/* Pestañas */}
+      {/* Tabs */}
       <div className="nav" style={{ marginTop: 8 }}>
         <button
           className={`btn ${tab === "calendar" ? "primary" : ""}`}
@@ -375,9 +367,15 @@ export default function AdminHome() {
         >
           Ver clientes
         </button>
+        <button
+          className={`btn ${tab === "appointments" ? "primary" : ""}`}
+          onClick={() => setTab("appointments")}
+        >
+          Ver citas
+        </button>
       </div>
 
-      {/* ======== CALENDARIO ======== */}
+      {/* ===== CALENDARIO ===== */}
       {tab === "calendar" && (
         <div className="row">
           <div className="card">
@@ -402,27 +400,19 @@ export default function AdminHome() {
                   Día seleccionado: <strong>{date}</strong>
                   {loadingDay ? " …" : ""}
                 </span>
-                {!isPast && (
-                  <>
-                    {!hasInfo && (
-                      <span className="pill">
-                        Configura el día con el panel de la derecha
-                      </span>
-                    )}
-                    {hasInfo && (
-                      <span className="pill">
-                        Edita la configuración en el panel
-                      </span>
-                    )}
-                  </>
-                )}
-                {isPast && (
+                {isPast ? (
                   <span className="pill">Día pasado (solo lectura)</span>
+                ) : (
+                  <span className="pill">
+                    {dayInfo
+                      ? "Edita la configuración en el panel"
+                      : "Configura el día con el panel de la derecha"}
+                  </span>
                 )}
               </div>
             )}
 
-            {/* Citas SIEMPRE visibles al seleccionar el día */}
+            {/* Citas del día */}
             <div style={{ marginTop: 12 }}>
               <h4>Citas {date || ""}</h4>
               {dayAppts.length === 0 ? (
@@ -434,33 +424,34 @@ export default function AdminHome() {
                       <th>Hora</th>
                       <th>Cliente</th>
                       <th>Motivo</th>
-                      <th>Estado</th>
+                      <th>Situación</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {dayAppts.map((a) => (
-                      <tr key={a._id}>
-                        <td>{(a.time || "").slice(0, 5)}</td>
-                        <td>
-                          {a.clientId
-                            ? `${a.clientId.firstName} ${a.clientId.lastName}`
-                            : "—"}
-                        </td>
-                        <td>{a.clientId?.reason || "—"}</td>
-                        <td>{a.status}</td>
-                      </tr>
-                    ))}
+                    {dayAppts.map((a) => {
+                      const pastRow = date < todayYMD();
+                      return (
+                        <tr key={a._id}>
+                          <td>{(a.time || "").slice(0, 5)}</td>
+                          <td>{getClientName(a) || "—"}</td>
+                          <td>{a.clientId?.reason || "—"}</td>
+                          <td>
+                            <StatusPill value={a.status} isPast={pastRow} />
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
             </div>
           </div>
 
-          {/* ======== EDITOR POR RANGO ======== */}
+          {/* Editor del día */}
           {showDayForm && (
             <div className="card">
               <h3 style={{ marginBottom: 8 }}>
-                {hasInfo ? "Editar día" : "Configurar día"}: {date || "—"}
+                {dayInfo ? "Editar día" : "Configurar día"}: {date || "—"}
                 {isPast && (
                   <span className="pill" style={{ marginLeft: 8 }}>
                     Solo lectura
@@ -518,7 +509,7 @@ export default function AdminHome() {
                   <div>
                     <label>Estado del día</label>
                     <div className="pill" style={{ padding: "10px 12px" }}>
-                      {activePreview
+                      {slots.some((s) => s.checked && !s.reserved)
                         ? "Activo (hay franjas marcadas)"
                         : "CERRADO (sin franjas marcadas)"}
                     </div>
@@ -546,7 +537,6 @@ export default function AdminHome() {
                   </div>
                 </div>
 
-                {/* Slots del rango */}
                 <div style={{ marginTop: 14 }}>
                   <h4 style={{ marginBottom: 8 }}>
                     Franjas {rangeStart}–{rangeEnd}
@@ -607,11 +597,6 @@ export default function AdminHome() {
                       </label>
                     ))}
                   </div>
-                  <p style={{ marginTop: 8, opacity: 0.85 }}>
-                    Marca las horas que estarán disponibles. Sólo se generan
-                    franjas que <strong>caben completas</strong> dentro del
-                    rango.
-                  </p>
                 </div>
 
                 <button
@@ -628,11 +613,35 @@ export default function AdminHome() {
         </div>
       )}
 
-      {/* ======== CLIENTES ======== */}
+      {/* ===== CLIENTES ===== */}
       {tab === "clients" && (
         <div className="card">
           <h3>Clientes</h3>
-          <form onSubmit={createClient}>
+
+          <div className="row" style={{ marginBottom: 8 }}>
+            <div>
+              <label>Buscar</label>
+              <input
+                placeholder="Nombre, apellidos, teléfono o motivo…"
+                value={clientQuery}
+                onChange={(e) => setClientQuery(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const c = await api.createClient(newClient);
+              setClients([c, ...clients]);
+              setNewClient({
+                firstName: "",
+                lastName: "",
+                phone: "",
+                reason: "",
+              });
+            }}
+          >
             <div className="row">
               <div>
                 <label>Nombre</label>
@@ -676,103 +685,224 @@ export default function AdminHome() {
             <button className="btn">Añadir</button>
           </form>
 
-          <table style={{ marginTop: 12 }}>
-            <thead>
-              <tr>
-                <th>Nombre</th>
-                <th>Teléfono</th>
-                <th>Motivo</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {clients.map((c) => {
-                const isEditing = editingId === c._id;
-                return (
-                  <tr key={c._id}>
-                    <td>
-                      {isEditing ? (
-                        <>
+          <div className="table-wrap" style={{ marginTop: 12 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Teléfono</th>
+                  <th>Motivo</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredClients.map((c) => {
+                  const edit = editingId === c._id;
+                  return (
+                    <tr key={c._id}>
+                      <td>
+                        {edit ? (
+                          <>
+                            <input
+                              value={editForm.firstName}
+                              onChange={(e) =>
+                                setEditForm({
+                                  ...editForm,
+                                  firstName: e.target.value,
+                                })
+                              }
+                            />
+                            <input
+                              value={editForm.lastName}
+                              onChange={(e) =>
+                                setEditForm({
+                                  ...editForm,
+                                  lastName: e.target.value,
+                                })
+                              }
+                            />
+                          </>
+                        ) : (
+                          `${c.firstName} ${c.lastName}`
+                        )}
+                      </td>
+                      <td>
+                        {edit ? (
                           <input
-                            value={editForm.firstName}
+                            value={editForm.phone}
                             onChange={(e) =>
                               setEditForm({
                                 ...editForm,
-                                firstName: e.target.value,
+                                phone: e.target.value,
                               })
                             }
                           />
+                        ) : (
+                          c.phone || "—"
+                        )}
+                      </td>
+                      <td>
+                        {edit ? (
                           <input
-                            value={editForm.lastName}
+                            value={editForm.reason}
                             onChange={(e) =>
                               setEditForm({
                                 ...editForm,
-                                lastName: e.target.value,
+                                reason: e.target.value,
                               })
                             }
                           />
-                        </>
-                      ) : (
-                        `${c.firstName} ${c.lastName}`
-                      )}
-                    </td>
-                    <td>
-                      {isEditing ? (
-                        <input
-                          value={editForm.phone}
-                          onChange={(e) =>
-                            setEditForm({ ...editForm, phone: e.target.value })
-                          }
-                        />
-                      ) : (
-                        c.phone
-                      )}
-                    </td>
-                    <td>
-                      {isEditing ? (
-                        <input
-                          value={editForm.reason}
-                          onChange={(e) =>
-                            setEditForm({ ...editForm, reason: e.target.value })
-                          }
-                        />
-                      ) : (
-                        c.reason || "—"
-                      )}
-                    </td>
-                    <td>
-                      {!isEditing ? (
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button className="btn" onClick={() => startEdit(c)}>
-                            Editar
-                          </button>
-                          <button
-                            className="btn"
-                            onClick={() => removeClient(c._id)}
-                          >
-                            Borrar
-                          </button>
-                        </div>
-                      ) : (
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button
-                            className="btn primary"
-                            disabled={savingEdit}
-                            onClick={() => saveEdit(c._id)}
-                          >
-                            Guardar
-                          </button>
-                          <button className="btn" onClick={cancelEdit}>
-                            Cancelar
-                          </button>
-                        </div>
-                      )}
+                        ) : (
+                          c.reason || "—"
+                        )}
+                      </td>
+                      <td>
+                        {edit ? (
+                          <>
+                            <button
+                              className="btn primary"
+                              disabled={savingEdit}
+                              onClick={async () => {
+                                setSavingEdit(true);
+                                try {
+                                  const updated = await api.updateClient(
+                                    c._id,
+                                    editForm
+                                  );
+                                  setClients(
+                                    clients.map((x) =>
+                                      x._id === c._id ? updated : x
+                                    )
+                                  );
+                                  setEditingId(null);
+                                  setEditForm({
+                                    firstName: "",
+                                    lastName: "",
+                                    phone: "",
+                                    reason: "",
+                                  });
+                                } finally {
+                                  setSavingEdit(false);
+                                }
+                              }}
+                            >
+                              Guardar
+                            </button>
+                            <button
+                              className="btn"
+                              onClick={() => {
+                                setEditingId(null);
+                                setEditForm({
+                                  firstName: "",
+                                  lastName: "",
+                                  phone: "",
+                                  reason: "",
+                                });
+                              }}
+                            >
+                              Cancelar
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              className="btn"
+                              onClick={() => {
+                                setEditingId(c._id);
+                                setEditForm({
+                                  firstName: c.firstName || "",
+                                  lastName: c.lastName || "",
+                                  phone: c.phone || "",
+                                  reason: c.reason || "",
+                                });
+                              }}
+                            >
+                              Editar
+                            </button>
+                            <button
+                              className="btn"
+                              onClick={async () => {
+                                if (!confirm("¿Borrar este cliente?")) return;
+                                await api.deleteClient(c._id);
+                                setClients(
+                                  clients.filter((x) => x._id !== c._id)
+                                );
+                              }}
+                            >
+                              Borrar
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ===== VER CITAS ===== */}
+      {tab === "appointments" && (
+        <div className="card">
+          <h3>Ver citas</h3>
+
+          <div className="row" style={{ marginBottom: 8 }}>
+            <div>
+              <label>Persona (filtra al escribir)</label>
+              <input
+                placeholder="Escribe nombre o apellidos…"
+                value={personQuery}
+                onChange={(e) => setPersonQuery(e.target.value)}
+              />
+            </div>
+            <div>
+              <label>Fecha</label>
+              <input
+                type="date"
+                value={filterDay}
+                onChange={(e) => setFilterDay(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Día</th>
+                  <th>Hora</th>
+                  <th>Persona</th>
+                  <th>Motivo</th>
+                  <th>Situación</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredAppts.length === 0 && (
+                  <tr>
+                    <td colSpan="5" style={{ opacity: 0.8 }}>
+                      Sin resultados para el filtro.
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                )}
+                {filteredAppts.map((a) => {
+                  const pastRow = (a.date || "") < todayYMD();
+                  return (
+                    <tr key={a._id}>
+                      <td>{fmtDDMMYYYY(a.date)}</td>
+                      <td>{(a.time || "").slice(0, 5)}</td>
+                      <td>{getClientName(a) || "—"}</td>
+                      <td>{a.clientId?.reason || "—"}</td>
+                      <td>
+                        <StatusPill value={a.status} isPast={pastRow} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </>
