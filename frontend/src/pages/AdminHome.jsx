@@ -21,7 +21,6 @@ function fmtDDMMYYYY(ymd) {
 function todayYMD() {
   return new Date().toISOString().slice(0, 10);
 }
-// normaliza texto (sin acentos, minúsculas)
 function norm(s) {
   return (s ?? "")
     .toString()
@@ -30,16 +29,21 @@ function norm(s) {
     .toLowerCase()
     .trim();
 }
-// nombre del cliente desde la cita (tras normalización de api.js)
 function getClientName(a) {
   const c = a?.clientId;
   if (!c) return "";
-  const first = c.firstName || "";
-  const last = c.lastName || "";
-  return `${first} ${last}`.trim();
+  return `${c.firstName || ""} ${c.lastName || ""}`.trim();
+}
+function isPastDateTime(date, time) {
+  if (!date) return false;
+  const now = new Date();
+  const [Y, M, D] = date.split("-").map(Number);
+  const [h, m] = (time || "00:00").slice(0, 5).split(":").map(Number);
+  const dt = new Date(Y, M - 1, D, h, m, 0, 0);
+  return dt.getTime() < now.getTime();
 }
 
-// Genera slots dentro del rango que caben completos
+// Slots
 function buildSlotsInRange(
   start,
   end,
@@ -67,7 +71,7 @@ function buildSlotsInRange(
   return out;
 }
 
-// Normaliza estado visual en días pasados
+// Estado visual
 function computeDisplayStatus(status, isPast) {
   const raw = (status || "").toString().trim().toLowerCase();
   const isPaid = /paid|pagad/.test(raw);
@@ -80,8 +84,6 @@ function computeDisplayStatus(status, isPast) {
   if (/cancel/.test(raw)) return "cancelled";
   return raw || "reserved";
 }
-
-// Badge de estado
 function StatusPill({ value, isPast }) {
   const key = computeDisplayStatus(value, isPast);
   const map = {
@@ -98,19 +100,14 @@ function StatusPill({ value, isPast }) {
 export default function AdminHome() {
   const nav = useNavigate();
 
-  // Pestañas
   const [tab, setTab] = useState("calendar");
-
-  // Día seleccionado
   const [date, setDate] = useState("");
   const [isPast, setIsPast] = useState(false);
 
-  // Info del día + citas
   const [dayInfo, setDayInfo] = useState(null);
   const [dayAppts, setDayAppts] = useState([]);
   const [loadingDay, setLoadingDay] = useState(false);
 
-  // Editor de rango
   const [showDayForm, setShowDayForm] = useState(false);
   const [slotMinutes, setSlotMinutes] = useState(60);
   const [rangeStart, setRangeStart] = useState("09:00");
@@ -118,10 +115,8 @@ export default function AdminHome() {
   const [slots, setSlots] = useState([]);
   const [msg, setMsg] = useState("");
 
-  // Refresco calendario
   const [reloadToken, setReloadToken] = useState(0);
 
-  // Clientes
   const [clients, setClients] = useState([]);
   const [clientQuery, setClientQuery] = useState("");
   const [newClient, setNewClient] = useState({
@@ -139,12 +134,10 @@ export default function AdminHome() {
   });
   const [savingEdit, setSavingEdit] = useState(false);
 
-  // Citas globales
   const [apptsAll, setApptsAll] = useState([]);
   const [personQuery, setPersonQuery] = useState("");
   const [filterDay, setFilterDay] = useState("");
 
-  // Cargar datos según pestaña
   useEffect(() => {
     if (tab === "clients") loadClients();
     if (tab === "appointments") loadApptsAll();
@@ -157,10 +150,8 @@ export default function AdminHome() {
       console.error(e);
     }
   }
-
   async function loadApptsAll() {
     try {
-      // extremo amplio para traer todo
       const rows = await api.appointmentsSummary("1970-01-01", "2100-12-31");
       setApptsAll(Array.isArray(rows) ? rows : []);
     } catch (e) {
@@ -174,7 +165,7 @@ export default function AdminHome() {
     nav("/", { replace: true });
   }
 
-  // Seleccionar día en calendario
+  // Selección día
   async function pickDay(d, meta = {}) {
     setDate(d);
     setIsPast(!!meta.isPast);
@@ -211,7 +202,7 @@ export default function AdminHome() {
     }
   }
 
-  // Regenerar slots al cambiar duración o rango
+  // Regenerar slots
   useEffect(() => {
     if (!showDayForm) return;
     const prev = new Map(slots.map((s) => [s.time, s.checked]));
@@ -236,7 +227,6 @@ export default function AdminHome() {
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slotMinutes]);
-
   useEffect(() => {
     if (!showDayForm) return;
     if (toMinutes(rangeEnd) <= toMinutes(rangeStart)) return;
@@ -309,36 +299,64 @@ export default function AdminHome() {
     }
   }
 
-  // Filtrado de "Ver clientes"
+  // Filtros
   const filteredClients = useMemo(() => {
     const q = norm(clientQuery);
     if (!q) return clients;
-    return clients.filter((c) => {
-      const full = norm(
+    return clients.filter((c) =>
+      norm(
         `${c.firstName || ""} ${c.lastName || ""} ${c.phone || ""} ${
           c.reason || ""
         }`
-      );
-      return full.includes(q);
-    });
+      ).includes(q)
+    );
   }, [clients, clientQuery]);
 
-  // Filtrado de "Ver citas" (robusto)
   const filteredAppts = useMemo(() => {
-    const q = norm(personQuery);
-    const d = (filterDay || "").trim(); // YYYY-MM-DD
-    const data = (apptsAll || []).filter((a) => {
-      if (q) {
-        const full = norm(getClientName(a));
-        if (!full.includes(q)) return false;
-      }
+    const q = norm(personQuery),
+      d = (filterDay || "").trim();
+    const list = (apptsAll || []).filter((a) => {
+      if (q && !norm(getClientName(a)).includes(q)) return false;
       if (d && a?.date !== d) return false;
       return true;
     });
-    return data.sort((x, y) =>
+    return list.sort((x, y) =>
       `${x.date} ${x.time || ""}`.localeCompare(`${y.date} ${y.time || ""}`)
     );
   }, [apptsAll, personQuery, filterDay]);
+
+  // ====== TICK "Pagado" ======
+  async function togglePaid(appt, checked) {
+    // Decide siguiente estado
+    let nextStatus = "paid";
+    if (!checked) {
+      nextStatus = isPastDateTime(appt.date, appt.time)
+        ? "pending_payment"
+        : "reserved";
+    }
+    try {
+      const updated = await api.updateAppointment(appt._id, {
+        status: nextStatus,
+      });
+      // actualiza en tablas globales y (si coincide día) también en el panel izquierdo:
+      setApptsAll((prev) =>
+        prev.map((a) =>
+          a._id === appt._id
+            ? { ...a, status: updated?.status || nextStatus }
+            : a
+        )
+      );
+      setDayAppts((prev) =>
+        prev.map((a) =>
+          a._id === appt._id
+            ? { ...a, status: updated?.status || nextStatus }
+            : a
+        )
+      );
+    } catch (e) {
+      alert(e.message || "No se pudo actualizar el estado.");
+    }
+  }
 
   return (
     <>
@@ -425,11 +443,14 @@ export default function AdminHome() {
                       <th>Cliente</th>
                       <th>Motivo</th>
                       <th>Situación</th>
+                      <th>Pagado ✓</th>
                     </tr>
                   </thead>
                   <tbody>
                     {dayAppts.map((a) => {
-                      const pastRow = date < todayYMD();
+                      const pastRow = isPastDateTime(a.date || date, a.time);
+                      const isPaid =
+                        computeDisplayStatus(a.status, pastRow) === "paid";
                       return (
                         <tr key={a._id}>
                           <td>{(a.time || "").slice(0, 5)}</td>
@@ -437,6 +458,13 @@ export default function AdminHome() {
                           <td>{a.clientId?.reason || "—"}</td>
                           <td>
                             <StatusPill value={a.status} isPast={pastRow} />
+                          </td>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={isPaid}
+                              onChange={(e) => togglePaid(a, e.target.checked)}
+                            />
                           </td>
                         </tr>
                       );
@@ -516,25 +544,30 @@ export default function AdminHome() {
                   </div>
                 </div>
 
-                <div style={{ marginTop: 12 }}>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => markAll(true)}
-                      disabled={isPast}
-                    >
-                      Marcar todo (en rango)
-                    </button>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => markAll(false)}
-                      disabled={isPast}
-                    >
-                      Bloquear todo (en rango)
-                    </button>
-                  </div>
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => markAll(true)}
+                    disabled={isPast}
+                  >
+                    Marcar todo
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => markAll(false)}
+                    disabled={isPast}
+                  >
+                    Bloquear todo
+                  </button>
                 </div>
 
                 <div style={{ marginTop: 14 }}>
@@ -696,84 +729,113 @@ export default function AdminHome() {
                 </tr>
               </thead>
               <tbody>
-                {filteredClients.map((c) => {
-                  const edit = editingId === c._id;
-                  return (
-                    <tr key={c._id}>
-                      <td>
-                        {edit ? (
-                          <>
+                {clients
+                  .filter((c) => {
+                    const q = norm(clientQuery);
+                    return (
+                      !q ||
+                      norm(
+                        `${c.firstName || ""} ${c.lastName || ""} ${
+                          c.phone || ""
+                        } ${c.reason || ""}`
+                      ).includes(q)
+                    );
+                  })
+                  .map((c) => {
+                    const edit = editingId === c._id;
+                    return (
+                      <tr key={c._id}>
+                        <td>
+                          {edit ? (
+                            <>
+                              <input
+                                value={editForm.firstName}
+                                onChange={(e) =>
+                                  setEditForm({
+                                    ...editForm,
+                                    firstName: e.target.value,
+                                  })
+                                }
+                              />
+                              <input
+                                value={editForm.lastName}
+                                onChange={(e) =>
+                                  setEditForm({
+                                    ...editForm,
+                                    lastName: e.target.value,
+                                  })
+                                }
+                              />
+                            </>
+                          ) : (
+                            `${c.firstName} ${c.lastName}`
+                          )}
+                        </td>
+                        <td>
+                          {edit ? (
                             <input
-                              value={editForm.firstName}
+                              value={editForm.phone}
                               onChange={(e) =>
                                 setEditForm({
                                   ...editForm,
-                                  firstName: e.target.value,
+                                  phone: e.target.value,
                                 })
                               }
                             />
+                          ) : (
+                            c.phone || "—"
+                          )}
+                        </td>
+                        <td>
+                          {edit ? (
                             <input
-                              value={editForm.lastName}
+                              value={editForm.reason}
                               onChange={(e) =>
                                 setEditForm({
                                   ...editForm,
-                                  lastName: e.target.value,
+                                  reason: e.target.value,
                                 })
                               }
                             />
-                          </>
-                        ) : (
-                          `${c.firstName} ${c.lastName}`
-                        )}
-                      </td>
-                      <td>
-                        {edit ? (
-                          <input
-                            value={editForm.phone}
-                            onChange={(e) =>
-                              setEditForm({
-                                ...editForm,
-                                phone: e.target.value,
-                              })
-                            }
-                          />
-                        ) : (
-                          c.phone || "—"
-                        )}
-                      </td>
-                      <td>
-                        {edit ? (
-                          <input
-                            value={editForm.reason}
-                            onChange={(e) =>
-                              setEditForm({
-                                ...editForm,
-                                reason: e.target.value,
-                              })
-                            }
-                          />
-                        ) : (
-                          c.reason || "—"
-                        )}
-                      </td>
-                      <td>
-                        {edit ? (
-                          <>
-                            <button
-                              className="btn primary"
-                              disabled={savingEdit}
-                              onClick={async () => {
-                                setSavingEdit(true);
-                                try {
-                                  const updated = await api.updateClient(
-                                    c._id,
-                                    editForm
-                                  );
-                                  setClients(
-                                    clients.map((x) =>
-                                      x._id === c._id ? updated : x
-                                    )
-                                  );
+                          ) : (
+                            c.reason || "—"
+                          )}
+                        </td>
+                        <td>
+                          {edit ? (
+                            <>
+                              <button
+                                className="btn primary"
+                                disabled={savingEdit}
+                                onClick={async () => {
+                                  setSavingEdit(true);
+                                  try {
+                                    const u = await api.updateClient(
+                                      c._id,
+                                      editForm
+                                    );
+                                    setClients(
+                                      clients.map((x) =>
+                                        x._id === c._id ? u : x
+                                      )
+                                    );
+                                    setEditingId(null);
+                                    setEditForm({
+                                      firstName: "",
+                                      lastName: "",
+                                      phone: "",
+                                      reason: "",
+                                    });
+                                  } finally {
+                                    setSavingEdit(false);
+                                  }
+                                }}
+                              >
+                                Guardar
+                              </button>
+                              <button
+                                className="btn"
+                                onClick={() => {
                                   setEditingId(null);
                                   setEditForm({
                                     firstName: "",
@@ -781,62 +843,45 @@ export default function AdminHome() {
                                     phone: "",
                                     reason: "",
                                   });
-                                } finally {
-                                  setSavingEdit(false);
-                                }
-                              }}
-                            >
-                              Guardar
-                            </button>
-                            <button
-                              className="btn"
-                              onClick={() => {
-                                setEditingId(null);
-                                setEditForm({
-                                  firstName: "",
-                                  lastName: "",
-                                  phone: "",
-                                  reason: "",
-                                });
-                              }}
-                            >
-                              Cancelar
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              className="btn"
-                              onClick={() => {
-                                setEditingId(c._id);
-                                setEditForm({
-                                  firstName: c.firstName || "",
-                                  lastName: c.lastName || "",
-                                  phone: c.phone || "",
-                                  reason: c.reason || "",
-                                });
-                              }}
-                            >
-                              Editar
-                            </button>
-                            <button
-                              className="btn"
-                              onClick={async () => {
-                                if (!confirm("¿Borrar este cliente?")) return;
-                                await api.deleteClient(c._id);
-                                setClients(
-                                  clients.filter((x) => x._id !== c._id)
-                                );
-                              }}
-                            >
-                              Borrar
-                            </button>
-                          </>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                                }}
+                              >
+                                Cancelar
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                className="btn"
+                                onClick={() => {
+                                  setEditingId(c._id);
+                                  setEditForm({
+                                    firstName: c.firstName || "",
+                                    lastName: c.lastName || "",
+                                    phone: c.phone || "",
+                                    reason: c.reason || "",
+                                  });
+                                }}
+                              >
+                                Editar
+                              </button>
+                              <button
+                                className="btn"
+                                onClick={async () => {
+                                  if (!confirm("¿Borrar este cliente?")) return;
+                                  await api.deleteClient(c._id);
+                                  setClients(
+                                    clients.filter((x) => x._id !== c._id)
+                                  );
+                                }}
+                              >
+                                Borrar
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           </div>
@@ -876,18 +921,21 @@ export default function AdminHome() {
                   <th>Persona</th>
                   <th>Motivo</th>
                   <th>Situación</th>
+                  <th>Pagado ✓</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredAppts.length === 0 && (
                   <tr>
-                    <td colSpan="5" style={{ opacity: 0.8 }}>
+                    <td colSpan="6" style={{ opacity: 0.8 }}>
                       Sin resultados para el filtro.
                     </td>
                   </tr>
                 )}
                 {filteredAppts.map((a) => {
-                  const pastRow = (a.date || "") < todayYMD();
+                  const pastRow = isPastDateTime(a.date, a.time);
+                  const isPaid =
+                    computeDisplayStatus(a.status, pastRow) === "paid";
                   return (
                     <tr key={a._id}>
                       <td>{fmtDDMMYYYY(a.date)}</td>
@@ -896,6 +944,14 @@ export default function AdminHome() {
                       <td>{a.clientId?.reason || "—"}</td>
                       <td>
                         <StatusPill value={a.status} isPast={pastRow} />
+                      </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={isPaid}
+                          onChange={(e) => togglePaid(a, e.target.checked)}
+                          title="Marcar como pagado"
+                        />
                       </td>
                     </tr>
                   );

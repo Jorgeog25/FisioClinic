@@ -115,3 +115,30 @@ exports.create = async (req, res, next) => {
     next(e);
   }
 };
+
+exports.update = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const patch = {};
+    if (typeof req.body.status === 'string') patch.status = req.body.status;
+
+    const upd = await Appointment.findByIdAndUpdate(id, { $set: patch }, { new: true })
+      .populate('clientId','firstName lastName reason')
+      .lean();
+
+    if (!upd) return res.status(404).json({ error: 'Cita no encontrada' });
+
+    res.json({
+      _id: upd._id,
+      date: upd.date,
+      time: (upd.time||'').slice(0,5),
+      status: upd.status,
+      clientId: upd.clientId ? {
+        _id: upd.clientId._id,
+        firstName: upd.clientId.firstName || '',
+        lastName:  upd.clientId.lastName  || '',
+        reason:    upd.clientId.reason    || '',
+      } : null
+    });
+  } catch (e) { next(e); }
+};
