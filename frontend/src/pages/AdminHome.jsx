@@ -402,8 +402,8 @@ export default function AdminHome() {
               onPickDay={pickDay}
               adminMode={true}
               reloadToken={reloadToken}
+              selectedDate={date} // 👈 para marcar el día en morado
             />
-
             {date && (
               <div
                 style={{

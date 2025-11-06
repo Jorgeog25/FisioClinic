@@ -17,6 +17,7 @@ export default function MonthCalendar({
   onPickDay,
   adminMode = false,
   reloadToken = 0,
+  selectedDate = "", // 👈 NUEVO: fecha seleccionada (YYYY-MM-DD)
 }) {
   const [monthStart, setMonthStart] = useState(
     new Date(new Date().getFullYear(), new Date().getMonth(), 1)
@@ -143,6 +144,7 @@ export default function MonthCalendar({
           const isToday = key === todayStr;
           const isPast = ymdNum(key) < todayNum;
           const hadAppts = isPast && pastWithAppts[key] > 0;
+          const isSelected = selectedDate && key === selectedDate; // 👈 NUEVO
 
           let cls = "day";
           if (hadAppts) cls += " past-appts";
@@ -150,6 +152,7 @@ export default function MonthCalendar({
           else if (isActive) cls += " active";
           else cls += " inactive";
           if (isToday) cls += " today";
+          if (isSelected) cls += " selected"; // 👈 NUEVO
 
           const title = hadAppts
             ? "Día pasado con citas"
