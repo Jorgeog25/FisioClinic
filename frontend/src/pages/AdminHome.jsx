@@ -40,7 +40,7 @@ function buildSlotsInRange(
       time,
       reserved,
       blocked: blockedManual,
-      // 🔧 slots reservados se marcan checked=true (y siguen disabled) para no disparar falsas alertas
+      // Reservadas: checked=true (pero disabled), para evitar falsos avisos
       checked: reserved ? true : !blockedManual,
     });
     t += step;
@@ -52,7 +52,7 @@ export default function AdminHome() {
   const nav = useNavigate();
 
   // pestañas
-  const [tab, setTab] = useState("calendar"); // 'calendar' | 'clients'
+  const [tab, setTab] = useState("calendar");
 
   // selección de día
   const [date, setDate] = useState("");
@@ -61,7 +61,6 @@ export default function AdminHome() {
   // info del día
   const [dayInfo, setDayInfo] = useState(null); // {date, startTime, endTime, slotMinutes, isActive, blockedSlots}
   const [dayAppts, setDayAppts] = useState([]); // citas del día
-  const [appts, setAppts] = useState([]); // citas “ver citas del día”
   const [loadingDay, setLoadingDay] = useState(false);
 
   // editor (por rango)
@@ -108,25 +107,26 @@ export default function AdminHome() {
     }
   }
 
-  // seleccionar día
+  // ===== Seleccionar día: ahora muestra citas + horario automáticamente
   async function pickDay(d, meta = {}) {
     setDate(d);
     setIsPast(!!meta.isPast);
     setMsg("");
-    setAppts([]);
     setShowDayForm(false);
     setSlots([]);
     setLoadingDay(true);
     try {
+      // disponibilidad del día
       const rng = await api.listAvailability(d, d);
       const info = Array.isArray(rng) ? rng.find((x) => x.date === d) : null;
       setDayInfo(info || null);
 
+      // citas del día
       const list = await api.listAppointments(d);
       const apptsList = Array.isArray(list) ? list : [];
       setDayAppts(apptsList);
 
-      // rango por defecto desde la disponibilidad guardada o 09:00–17:00
+      // rango por defecto (si no hay, 09:00–17:00 y 60min)
       const start = info?.startTime || "09:00";
       const end = info?.endTime || "17:00";
       const step = info?.slotMinutes || 60;
@@ -138,6 +138,9 @@ export default function AdminHome() {
       const apptTimes = apptsList.map((a) => (a.time || "").slice(0, 5));
       const blocked = info?.blockedSlots || [];
       setSlots(buildSlotsInRange(start, end, step, apptTimes, blocked));
+
+      // muestra el panel a la derecha SIEMPRE (si es pasado, será read-only)
+      setShowDayForm(true);
     } catch (e) {
       setDayInfo(null);
       setDayAppts([]);
@@ -147,6 +150,7 @@ export default function AdminHome() {
     }
   }
 
+  // abrir editor (sigue disponible por si lo llamas desde otro sitio)
   function openFormForDay() {
     if (isPast) return;
     const info = dayInfo;
@@ -163,17 +167,7 @@ export default function AdminHome() {
     setShowDayForm(true);
   }
 
-  async function viewDayAppointments() {
-    if (!date) return;
-    try {
-      const list = await api.listAppointments(date);
-      setAppts(Array.isArray(list) ? list : []);
-    } catch (e) {
-      setMsg(e.message);
-    }
-  }
-
-  // cambiar duración → regenerar dentro del rango
+  // regenerar slots al cambiar duración o rango
   useEffect(() => {
     if (!showDayForm) return;
     const prev = new Map(slots.map((s) => [s.time, s.checked]));
@@ -193,13 +187,12 @@ export default function AdminHome() {
           ? true
           : prev.has(s.time)
           ? prev.get(s.time)
-          : !s.blocked, // 🔧
+          : !s.blocked,
       }))
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slotMinutes]);
 
-  // cambiar el rango → regenerar cuadrícula
   useEffect(() => {
     if (!showDayForm) return;
     if (toMinutes(rangeEnd) <= toMinutes(rangeStart)) return;
@@ -220,7 +213,7 @@ export default function AdminHome() {
           ? true
           : prev.has(s.time)
           ? prev.get(s.time)
-          : !s.blocked, // 🔧
+          : !s.blocked,
       }))
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -236,12 +229,11 @@ export default function AdminHome() {
     );
   }
 
-  // ==== Herramientas rápidas sobre el RANGO ====
   function markAll(v) {
     setSlots(slots.map((s) => (s.reserved ? s : { ...s, checked: v })));
   }
 
-  // Guardar: horario = rango; activo si hay alguna franja marcada
+  // Guardar: horario = rango; activo si hay alguna franja marcada (no reservada)
   async function saveDay(e) {
     e.preventDefault();
     if (!date) return;
@@ -261,9 +253,6 @@ export default function AdminHome() {
       return;
     }
 
-    // ❌ (quitado) No comprobamos reserved && !checked: los reservados están disabled y el backend protege.
-
-    // blockedSlots = todas las NO reservadas con checked=false
     const blockedSlots = slots
       .filter((s) => !s.reserved && !s.checked)
       .map((s) => s.time);
@@ -308,7 +297,7 @@ export default function AdminHome() {
     }
   }
 
-  // ----- CRUD clientes (igual) -----
+  // ----- CRUD clientes -----
   async function createClient(e) {
     e.preventDefault();
     const c = await api.createClient(newClient);
@@ -413,36 +402,32 @@ export default function AdminHome() {
                   Día seleccionado: <strong>{date}</strong>
                   {loadingDay ? " …" : ""}
                 </span>
-                <button className="btn" onClick={viewDayAppointments}>
-                  Ver citas del día {loadingDay ? "" : `(${dayAppts.length})`}
-                </button>
-
                 {!isPast && (
                   <>
                     {!hasInfo && (
-                      <button className="btn" onClick={openFormForDay}>
-                        Configurar día
-                      </button>
+                      <span className="pill">
+                        Configura el día con el panel de la derecha
+                      </span>
                     )}
                     {hasInfo && (
-                      <button className="btn" onClick={openFormForDay}>
-                        Editar día
-                      </button>
+                      <span className="pill">
+                        Edita la configuración en el panel
+                      </span>
                     )}
                   </>
                 )}
-
                 {isPast && (
-                  <span className="pill" title="No editable">
-                    Día pasado (no editable)
-                  </span>
+                  <span className="pill">Día pasado (solo lectura)</span>
                 )}
               </div>
             )}
 
-            {appts.length > 0 && (
-              <div style={{ marginTop: 12 }}>
-                <h4>Citas {date}</h4>
+            {/* Citas SIEMPRE visibles al seleccionar el día */}
+            <div style={{ marginTop: 12 }}>
+              <h4>Citas {date || ""}</h4>
+              {dayAppts.length === 0 ? (
+                <p style={{ opacity: 0.8 }}>No hay citas para este día.</p>
+              ) : (
                 <table>
                   <thead>
                     <tr>
@@ -453,7 +438,7 @@ export default function AdminHome() {
                     </tr>
                   </thead>
                   <tbody>
-                    {appts.map((a) => (
+                    {dayAppts.map((a) => (
                       <tr key={a._id}>
                         <td>{(a.time || "").slice(0, 5)}</td>
                         <td>
@@ -467,15 +452,20 @@ export default function AdminHome() {
                     ))}
                   </tbody>
                 </table>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {/* ======== EDITOR POR RANGO ======== */}
-          {showDayForm && !isPast && (
+          {showDayForm && (
             <div className="card">
               <h3 style={{ marginBottom: 8 }}>
                 {hasInfo ? "Editar día" : "Configurar día"}: {date || "—"}
+                {isPast && (
+                  <span className="pill" style={{ marginLeft: 8 }}>
+                    Solo lectura
+                  </span>
+                )}
               </h3>
 
               <form onSubmit={saveDay}>
@@ -486,6 +476,7 @@ export default function AdminHome() {
                       type="time"
                       value={rangeStart}
                       onChange={(e) => setRangeStart(e.target.value)}
+                      disabled={isPast}
                     />
                   </div>
                   <div>
@@ -494,6 +485,7 @@ export default function AdminHome() {
                       type="time"
                       value={rangeEnd}
                       onChange={(e) => setRangeEnd(e.target.value)}
+                      disabled={isPast}
                     />
                   </div>
                 </div>
@@ -507,6 +499,7 @@ export default function AdminHome() {
                       min={5}
                       step={5}
                       onChange={(e) => setSlotMinutes(e.target.value)}
+                      disabled={isPast}
                     />
                     <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
                       {[15, 30, 45, 60].map((n) => (
@@ -515,6 +508,7 @@ export default function AdminHome() {
                           className="btn"
                           key={n}
                           onClick={() => setSlotMinutes(n)}
+                          disabled={isPast}
                         >
                           {n} min
                         </button>
@@ -537,6 +531,7 @@ export default function AdminHome() {
                       type="button"
                       className="btn"
                       onClick={() => markAll(true)}
+                      disabled={isPast}
                     >
                       Marcar todo (en rango)
                     </button>
@@ -544,6 +539,7 @@ export default function AdminHome() {
                       type="button"
                       className="btn"
                       onClick={() => markAll(false)}
+                      disabled={isPast}
                     >
                       Bloquear todo (en rango)
                     </button>
@@ -586,13 +582,14 @@ export default function AdminHome() {
                           display: "inline-flex",
                           alignItems: "center",
                           gap: 8,
+                          opacity: isPast ? 0.65 : 1,
                         }}
                       >
                         <input
                           type="checkbox"
                           checked={s.checked}
                           onChange={() => toggleSlot(i)}
-                          disabled={s.reserved}
+                          disabled={s.reserved || isPast}
                         />
                         <span style={{ minWidth: 56, display: "inline-block" }}>
                           {s.time}
@@ -619,7 +616,7 @@ export default function AdminHome() {
 
                 <button
                   className="btn primary"
-                  disabled={!date}
+                  disabled={!date || isPast}
                   style={{ marginTop: 10 }}
                 >
                   Guardar
