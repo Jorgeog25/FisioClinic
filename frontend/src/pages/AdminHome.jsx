@@ -1,149 +1,10 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import MonthCalendar from "../components/MonthCalendar";
-import { api, clearAuth, getUser } from "../api";
-import { io } from "socket.io-client";
+import ChatBox from "../components/ChatBox";
+import { api, clearAuth } from "../api";
 
-/* ================= Chat ================= */
-const SOCKET_URL = "http://localhost:4000";
-let __socket;
-function getSocket() {
-  if (!__socket) __socket = io(SOCKET_URL, { autoConnect: true });
-  return __socket;
-}
-
-function ChatBox({ room, title = "Chat", onClose }) {
-  const me = getUser();
-  const socket = getSocket();
-  const [messages, setMessages] = useState([]);
-  const [msg, setMsg] = useState("");
-  const [typingInfo, setTypingInfo] = useState("");
-  const scrollRef = useRef(null);
-
-  useEffect(() => {
-    function onReceive(data) {
-      if (data?.room !== room) return;
-      setMessages((prev) => [...prev, { user: data.user, text: data.message }]);
-    }
-    function onTyping(data) {
-      if (data?.room !== room) return;
-      setTypingInfo(`${data.user} está escribiendo…`);
-      const t = setTimeout(() => setTypingInfo(""), 1200);
-      return () => clearTimeout(t);
-    }
-    socket.on("receiveMessage", onReceive);
-    socket.on("typing", onTyping);
-    return () => {
-      socket.off("receiveMessage", onReceive);
-      socket.off("typing", onTyping);
-    };
-  }, [room, socket]);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages]);
-
-  const displayName =
-    (me?.firstName || me?.lastName
-      ? `${me.firstName || ""} ${me.lastName || ""}`.trim()
-      : me?.email) || "Usuario";
-
-  function send() {
-    const txt = msg.trim();
-    if (!txt) return;
-    socket.emit("sendMessage", { room, message: txt, user: displayName });
-    setMsg("");
-  }
-  function typing() {
-    socket.emit("typing", { room, user: displayName });
-  }
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,.4)",
-        display: "grid",
-        placeItems: "center",
-        zIndex: 50,
-      }}
-      onClick={onClose}
-    >
-      <div
-        className="card"
-        style={{ width: "min(720px, 90vw)" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <h3 style={{ margin: 0 }}>{title}</h3>
-          <button className="btn" onClick={onClose}>
-            Cerrar
-          </button>
-        </div>
-
-        <div
-          ref={scrollRef}
-          style={{
-            marginTop: 8,
-            maxHeight: 320,
-            overflowY: "auto",
-            padding: 10,
-            border: "1px solid #1f2937",
-            borderRadius: 10,
-            background: "#0b1220",
-          }}
-        >
-          {messages.length === 0 && (
-            <p style={{ opacity: 0.7, margin: 0 }}>No hay mensajes aún.</p>
-          )}
-          {messages.map((m, i) => (
-            <div key={i} style={{ marginBottom: 8, lineHeight: 1.2 }}>
-              <strong style={{ color: "#93c5fd" }}>{m.user}:</strong>{" "}
-              <span>{m.text}</span>
-            </div>
-          ))}
-        </div>
-
-        {typingInfo && (
-          <div style={{ fontSize: 12, opacity: 0.8, marginTop: 6 }}>
-            {typingInfo}
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          <input
-            value={msg}
-            onChange={(e) => setMsg(e.target.value)}
-            onKeyDown={(e) => {
-              typing();
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
-              }
-            }}
-            placeholder="Escribe un mensaje…"
-            style={{ flex: 1 }}
-          />
-          <button className="btn primary" onClick={send}>
-            Enviar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ================ Utils existentes ================ */
+// ===== Utils =====
 function toMinutes(hhmm) {
   const [h, m] = hhmm.split(":").map(Number);
   return h * 60 + m;
@@ -182,6 +43,8 @@ function isPastDateTime(date, time) {
   const dt = new Date(Y, M - 1, D, h, m, 0, 0);
   return dt.getTime() < now.getTime();
 }
+
+// Slots
 function buildSlotsInRange(
   start,
   end,
@@ -208,6 +71,8 @@ function buildSlotsInRange(
   }
   return out;
 }
+
+// Estado visual
 function computeDisplayStatus(status, isPast) {
   const raw = (status || "").toString().trim().toLowerCase();
   const isPaid = /paid|pagad/.test(raw);
@@ -233,7 +98,6 @@ function StatusPill({ value, isPast }) {
   return <span className={cls}>{label}</span>;
 }
 
-/* =================== Página =================== */
 export default function AdminHome() {
   const nav = useNavigate();
 
@@ -275,7 +139,7 @@ export default function AdminHome() {
   const [personQuery, setPersonQuery] = useState("");
   const [filterDay, setFilterDay] = useState("");
 
-  // chat por cliente (modal)
+  // estado para chat modal
   const [chatClient, setChatClient] = useState(null);
 
   useEffect(() => {
@@ -305,6 +169,7 @@ export default function AdminHome() {
     nav("/", { replace: true });
   }
 
+  // Selección día
   async function pickDay(d, meta = {}) {
     setDate(d);
     setIsPast(!!meta.isPast);
@@ -341,6 +206,7 @@ export default function AdminHome() {
     }
   }
 
+  // Regenerar slots
   useEffect(() => {
     if (!showDayForm) return;
     const prev = new Map(slots.map((s) => [s.time, s.checked]));
@@ -365,7 +231,6 @@ export default function AdminHome() {
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slotMinutes]);
-
   useEffect(() => {
     if (!showDayForm) return;
     if (toMinutes(rangeEnd) <= toMinutes(rangeStart)) return;
@@ -438,6 +303,7 @@ export default function AdminHome() {
     }
   }
 
+  // Filtros
   const filteredClients = useMemo(() => {
     const q = norm(clientQuery);
     if (!q) return clients;
@@ -463,6 +329,7 @@ export default function AdminHome() {
     );
   }, [apptsAll, personQuery, filterDay]);
 
+  // ====== TICK "Pagado" ======
   async function togglePaid(appt, checked) {
     let nextStatus = "paid";
     if (!checked) {
@@ -495,6 +362,7 @@ export default function AdminHome() {
 
   return (
     <>
+      {/* Salir */}
       <div
         className="logout-box"
         onClick={() => {
@@ -505,6 +373,7 @@ export default function AdminHome() {
         <span>Salir</span>
       </div>
 
+      {/* Tabs */}
       <div className="nav" style={{ marginTop: 8 }}>
         <button
           className={`btn ${tab === "calendar" ? "primary" : ""}`}
@@ -537,6 +406,7 @@ export default function AdminHome() {
               reloadToken={reloadToken}
               selectedDate={date}
             />
+
             {date && (
               <div
                 style={{
@@ -862,114 +732,84 @@ export default function AdminHome() {
                 </tr>
               </thead>
               <tbody>
-                {clients
-                  .filter((c) => {
-                    const q = norm(clientQuery);
-                    return (
-                      !q ||
-                      norm(
-                        `${c.firstName || ""} ${c.lastName || ""} ${
-                          c.phone || ""
-                        } ${c.reason || ""}`
-                      ).includes(q)
-                    );
-                  })
-                  .map((c) => {
-                    const edit = editingId === c._id;
-                    const fullName = `${c.firstName} ${c.lastName}`.trim();
-                    return (
-                      <tr key={c._id}>
-                        <td>
-                          {edit ? (
-                            <>
-                              <input
-                                value={editForm.firstName}
-                                onChange={(e) =>
-                                  setEditForm({
-                                    ...editForm,
-                                    firstName: e.target.value,
-                                  })
-                                }
-                              />
-                              <input
-                                value={editForm.lastName}
-                                onChange={(e) =>
-                                  setEditForm({
-                                    ...editForm,
-                                    lastName: e.target.value,
-                                  })
-                                }
-                              />
-                            </>
-                          ) : (
-                            fullName
-                          )}
-                        </td>
-                        <td>
-                          {edit ? (
+                {filteredClients.map((c) => {
+                  const edit = editingId === c._id;
+                  return (
+                    <tr key={c._id}>
+                      <td>
+                        {edit ? (
+                          <>
                             <input
-                              value={editForm.phone}
+                              value={editForm.firstName}
                               onChange={(e) =>
                                 setEditForm({
                                   ...editForm,
-                                  phone: e.target.value,
+                                  firstName: e.target.value,
                                 })
                               }
                             />
-                          ) : (
-                            c.phone || "—"
-                          )}
-                        </td>
-                        <td>
-                          {edit ? (
                             <input
-                              value={editForm.reason}
+                              value={editForm.lastName}
                               onChange={(e) =>
                                 setEditForm({
                                   ...editForm,
-                                  reason: e.target.value,
+                                  lastName: e.target.value,
                                 })
                               }
                             />
-                          ) : (
-                            c.reason || "—"
-                          )}
-                        </td>
-                        <td>
-                          {edit ? (
-                            <>
-                              <button
-                                className="btn primary"
-                                disabled={savingEdit}
-                                onClick={async () => {
-                                  setSavingEdit(true);
-                                  try {
-                                    const u = await api.updateClient(
-                                      c._id,
-                                      editForm
-                                    );
-                                    setClients(
-                                      clients.map((x) =>
-                                        x._id === c._id ? u : x
-                                      )
-                                    );
-                                    setEditingId(null);
-                                    setEditForm({
-                                      firstName: "",
-                                      lastName: "",
-                                      phone: "",
-                                      reason: "",
-                                    });
-                                  } finally {
-                                    setSavingEdit(false);
-                                  }
-                                }}
-                              >
-                                Guardar
-                              </button>
-                              <button
-                                className="btn"
-                                onClick={() => {
+                          </>
+                        ) : (
+                          `${c.firstName} ${c.lastName}`
+                        )}
+                      </td>
+                      <td>
+                        {edit ? (
+                          <input
+                            value={editForm.phone}
+                            onChange={(e) =>
+                              setEditForm({
+                                ...editForm,
+                                phone: e.target.value,
+                              })
+                            }
+                          />
+                        ) : (
+                          c.phone || "—"
+                        )}
+                      </td>
+                      <td>
+                        {edit ? (
+                          <input
+                            value={editForm.reason}
+                            onChange={(e) =>
+                              setEditForm({
+                                ...editForm,
+                                reason: e.target.value,
+                              })
+                            }
+                          />
+                        ) : (
+                          c.reason || "—"
+                        )}
+                      </td>
+                      <td>
+                        {edit ? (
+                          <>
+                            <button
+                              className="btn primary"
+                              disabled={savingEdit}
+                              onClick={async () => {
+                                setSavingEdit(true);
+                                try {
+                                  const u = await api.updateClient(
+                                    c._id,
+                                    editForm
+                                  );
+                                  setClients(
+                                    clients.map((x) =>
+                                      x._id === c._id ? u : x
+                                    )
+                                  );
                                   setEditingId(null);
                                   setEditForm({
                                     firstName: "",
@@ -977,63 +817,95 @@ export default function AdminHome() {
                                     phone: "",
                                     reason: "",
                                   });
-                                }}
-                              >
-                                Cancelar
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button
-                                className="btn"
-                                onClick={() => {
-                                  setEditingId(c._id);
-                                  setEditForm({
-                                    firstName: c.firstName || "",
-                                    lastName: c.lastName || "",
-                                    phone: c.phone || "",
-                                    reason: c.reason || "",
-                                  });
-                                }}
-                              >
-                                Editar
-                              </button>
-                              <button
-                                className="btn"
-                                onClick={async () => {
-                                  if (!confirm("¿Borrar este cliente?")) return;
-                                  await api.deleteClient(c._id);
-                                  setClients(
-                                    clients.filter((x) => x._id !== c._id)
-                                  );
-                                }}
-                              >
-                                Borrar
-                              </button>
-                              {/* NUEVO: Chat por cliente */}
-                              <button
-                                className="btn"
-                                onClick={() => setChatClient(c)}
-                              >
-                                Chat
-                              </button>
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                                } finally {
+                                  setSavingEdit(false);
+                                }
+                              }}
+                            >
+                              Guardar
+                            </button>
+                            <button
+                              className="btn"
+                              onClick={() => {
+                                setEditingId(null);
+                                setEditForm({
+                                  firstName: "",
+                                  lastName: "",
+                                  phone: "",
+                                  reason: "",
+                                });
+                              }}
+                            >
+                              Cancelar
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              className="btn"
+                              onClick={() => {
+                                setEditingId(c._id);
+                                setEditForm({
+                                  firstName: c.firstName || "",
+                                  lastName: c.lastName || "",
+                                  phone: c.phone || "",
+                                  reason: c.reason || "",
+                                });
+                              }}
+                            >
+                              Editar
+                            </button>
+                            <button
+                              className="btn"
+                              onClick={async () => {
+                                if (!confirm("¿Borrar este cliente?")) return;
+                                await api.deleteClient(c._id);
+                                setClients(
+                                  clients.filter((x) => x._id !== c._id)
+                                );
+                              }}
+                            >
+                              Borrar
+                            </button>
+                            {/* Botón Chat */}
+                            <button
+                              className="btn"
+                              onClick={() => setChatClient(c)}
+                              title="Abrir chat con este cliente"
+                            >
+                              Chat
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
-          {/* Modal de chat por cliente */}
+          {/* Modal Chat */}
           {chatClient && (
-            <ChatBox
-              room={`client:${chatClient._id}`}
-              title={`Chat con ${chatClient.firstName} ${chatClient.lastName}`}
-              onClose={() => setChatClient(null)}
-            />
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                display: "grid",
+                placeItems: "center",
+                background: "rgba(0,0,0,.45)",
+                zIndex: 50,
+              }}
+              onClick={() => setChatClient(null)}
+            >
+              <div onClick={(e) => e.stopPropagation()}>
+                <ChatBox
+                  room={`client:${chatClient._id}`}
+                  title={`Chat con ${chatClient.firstName} ${chatClient.lastName}`}
+                  onClose={() => setChatClient(null)}
+                />
+              </div>
+            </div>
           )}
         </div>
       )}
