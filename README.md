@@ -101,7 +101,7 @@ nano .env.development
 VITE_API_URL=/api
 ```
 
-### Ejecución FInal
+### Ejecución Final
 
 ```bash
 cd backend
