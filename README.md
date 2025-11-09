@@ -186,4 +186,4 @@ Contraseña: admin123
 
 ## Tecnologías
 
-[Tecnologías utilizadas y porqué](../docs/Tecnologias.md)
+[Tecnologías utilizadas y porqué](/docs/Tecnologias.md)
