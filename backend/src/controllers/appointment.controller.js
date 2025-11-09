@@ -1,177 +1,98 @@
+// *** IMPORTA UNA SOLA VEZ ***
+// Con tu estructura real, el modelo está en ../models/Appointment
 const Appointment = require("../models/Appointment");
-const Client = require("../models/Client");
 
-// Helpers de forma y tiempo
-function toHHMM(s) {
-  if (!s) return s;
-  if (typeof s === "number") {
-    const h = Math.floor(s / 60),
-      m = s % 60;
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-  }
-  if (/^\d{2}:\d{2}:\d{2}$/.test(s)) return s.slice(0, 5);
-  if (/^\d{2}:\d{2}$/.test(s)) return s;
-  // ISO -> hh:mm
-  const d = new Date(s);
-  if (!isNaN(+d)) {
-    const h = d.getHours(),
-      m = d.getMinutes();
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-  }
-  return s;
-}
-
-function normalizeClientShape(c) {
-  if (!c) return null;
-  // c puede venir populado o id
-  if (typeof c === "object") {
-    return {
-      _id: c._id,
-      firstName: c.firstName || "",
-      lastName: c.lastName || "",
-      reason: c.reason || "",
-    };
-  }
-  // solo id
-  return c;
-}
-
-function normalizeAppointment(a) {
+// Normalizador para respuestas
+function normalize(a) {
+  if (!a) return a;
   return {
     _id: a._id,
-    date: a.date, // YYYY-MM-DD
-    time: toHHMM(a.time), // HH:mm
+    date: a.date,
+    time: (a.time || "").slice(0, 5),
     status: a.status || "reserved",
-    clientId: normalizeClientShape(a.clientId),
+    clientId: a.clientId || null,
   };
 }
 
-// GET /api/appointments?date=YYYY-MM-DD
-exports.listByDate = async (req, res, next) => {
+// GET /appointments?date=YYYY-MM-DD   (si no hay date => todas)
+exports.list = async (req, res, next) => {
   try {
     const { date } = req.query;
-    if (!date) return res.json([]); // UI lo maneja
-
-    const rows = await Appointment.find({ date })
-      .sort({ time: 1 })
-      .populate("clientId", "firstName lastName reason")
-      .lean();
-
-    res.json(rows.map(normalizeAppointment));
-  } catch (e) {
-    next(e);
-  }
-};
-
-// GET /api/appointments/summary?from=YYYY-MM-DD&to=YYYY-MM-DD&populate=1
-exports.summary = async (req, res, next) => {
-  try {
-    const { from, to, populate } = req.query;
     const q = {};
-    if (from) q.date = { ...(q.date || {}), $gte: from };
-    if (to) q.date = { ...(q.date || {}), $lte: to };
+    if (date) q.date = date;
 
-    let cur = Appointment.find(q).sort({ date: 1, time: 1 });
-    if (String(populate) === "1") {
-      cur = cur.populate("clientId", "firstName lastName reason");
-    }
-    const rows = await cur.lean();
-
-    res.json(rows.map(normalizeAppointment));
-  } catch (e) {
-    next(e);
-  }
-};
-
-// POST /api/appointments
-// body: { date:"YYYY-MM-DD", time:"HH:mm", clientId, status? }
-exports.create = async (req, res, next) => {
-  try {
-    let { date, time, clientId } = req.body;
-    if (!clientId && req.user?.clientId) clientId = req.user.clientId;
-    if (!date || !time || !clientId) {
-      return res
-        .status(400)
-        .json({ error: "date, time y clientId son obligatorios" });
-    }
-
-    // Bloqueo: ¿ya hay una cita en esa franja?
-    const clash = await Appointment.findOne({ date, time });
-    if (clash) {
-      return res.status(409).json({ error: "Esa hora ya está reservada." });
-    }
-
-    const created = await Appointment.create({
-      date,
-      time,
-      clientId,
-      status: "reserved",
-    });
-    res.status(201).json(created);
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.update = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const patch = {};
-    if (typeof req.body.status === "string") patch.status = req.body.status;
-
-    const upd = await Appointment.findByIdAndUpdate(
-      id,
-      { $set: patch },
-      { new: true }
-    )
+    const rows = await Appointment.find(q)
+      .sort({ date: 1, time: 1 })
       .populate("clientId", "firstName lastName reason")
       .lean();
 
-    if (!upd) return res.status(404).json({ error: "Cita no encontrada" });
-
-    res.json({
-      _id: upd._id,
-      date: upd.date,
-      time: (upd.time || "").slice(0, 5),
-      status: upd.status,
-      clientId: upd.clientId
-        ? {
-            _id: upd.clientId._id,
-            firstName: upd.clientId.firstName || "",
-            lastName: upd.clientId.lastName || "",
-            reason: upd.clientId.reason || "",
-          }
-        : null,
-    });
+    res.json(rows.map(normalize));
   } catch (e) {
     next(e);
   }
 };
 
+// (Si la tienes montada en rutas) GET /appointments/me
 exports.myHistory = async (req, res, next) => {
   try {
-    const clientId = req.user?.clientId || req.query.clientId; // por si usas token opcional
-    if (!clientId)
-      return res.status(403).json({ error: "Solo clientes autenticados" });
+    const clientId = req.user?.clientId;
+    if (!clientId) return res.status(403).json({ error: "Solo clientes autenticados" });
 
     const rows = await Appointment.find({ clientId })
       .sort({ date: 1, time: 1 })
       .populate("clientId", "firstName lastName reason")
       .lean();
 
-    res.json(rows.map(normalizeAppointment));
+    res.json(rows.map(normalize));
   } catch (e) {
     next(e);
   }
 };
 
-// Borrar cita
-exports.remove = async (req, res, next) => {
+// POST /appointments
+exports.create = async (req, res, next) => {
+  try {
+    let { date, time, clientId } = req.body;
+
+    // Toma clientId del token si no viene en body
+    if (!clientId && req.user?.clientId) clientId = req.user.clientId;
+
+    if (!date || !time || !clientId) {
+      return res.status(400).json({ error: "date, time y clientId son obligatorios" });
+    }
+
+    // Permite reservar si la anterior estaba cancelada
+    const clash = await Appointment.findOne({ date, time, status: { $ne: "cancelled" } });
+    if (clash) {
+      return res.status(409).json({ error: "Esa hora ya está reservada." });
+    }
+
+    const created = await Appointment.create({ date, time, clientId, status: "reserved" });
+    const saved = await Appointment.findById(created._id)
+      .populate("clientId", "firstName lastName reason")
+      .lean();
+
+    res.status(201).json(normalize(saved));
+  } catch (e) {
+    next(e);
+  }
+};
+
+// PATCH /appointments/:id   (status, etc.)
+exports.update = async (req, res, next) => {
   try {
     const id = req.params.id;
-    const doc = await Appointment.findByIdAndDelete(id);
-    if (!doc) return res.status(404).json({ error: "Cita no encontrada" });
-    res.json({ ok: true, _id: id });
+    const patch = {};
+
+    if (typeof req.body.status === "string") patch.status = req.body.status;
+    // añade aquí otros campos permitidos si un día los necesitas
+
+    const updated = await Appointment.findByIdAndUpdate(id, patch, { new: true })
+      .populate("clientId", "firstName lastName reason")
+      .lean();
+
+    if (!updated) return res.status(404).json({ error: "Cita no encontrada" });
+    res.json(normalize(updated));
   } catch (e) {
     next(e);
   }
