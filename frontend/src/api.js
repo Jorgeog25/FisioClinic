@@ -191,4 +191,7 @@ export const api = {
 
   chatHistory: (room, limit = 50) =>
     request(`/chat/${encodeURIComponent(room)}/history?limit=${limit}`),
+
+    deleteAppointment: (id) =>
+    request(`/appointments/${id}`, { method: 'DELETE' }),
 };

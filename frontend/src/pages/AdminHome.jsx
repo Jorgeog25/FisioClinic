@@ -4,23 +4,27 @@ import MonthCalendar from "../components/MonthCalendar";
 import ChatBox from "../components/ChatBox";
 import { api, clearAuth } from "../api";
 
-// ===== Utils =====
-function toMinutes(hhmm) {
+/* ===== Utils ===== */
+function toMinutes(hhmm = "00:00") {
   const [h, m] = hhmm.split(":").map(Number);
   return h * 60 + m;
 }
 function toHHMM(min) {
-  const h = Math.floor(min / 60),
-    m = min % 60;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
-function fmtDDMMYYYY(ymd) {
-  if (!ymd) return "";
-  const [Y, M, D] = ymd.split("-");
-  return `${D}/${M}/${Y}`;
+function isPastDateTime(date, time = "23:59") {
+  if (!date) return false;
+  const [Y, M, D] = date.split("-").map(Number);
+  const [h, m] = (time || "00:00").slice(0, 5).split(":").map(Number);
+  const dt = new Date(Y, M - 1, D, h, m, 0, 0);
+  return dt.getTime() < Date.now();
 }
-function todayYMD() {
-  return new Date().toISOString().slice(0, 10);
+function fmtDDMMYYYY(date) {
+  if (!date) return "";
+  const [Y, M, D] = date.split("-").map(Number);
+  return `${String(D).padStart(2, "0")}/${String(M).padStart(2, "0")}/${Y}`;
 }
 function norm(s) {
   return (s ?? "")
@@ -35,16 +39,6 @@ function getClientName(a) {
   if (!c) return "";
   return `${c.firstName || ""} ${c.lastName || ""}`.trim();
 }
-function isPastDateTime(date, time) {
-  if (!date) return false;
-  const now = new Date();
-  const [Y, M, D] = date.split("-").map(Number);
-  const [h, m] = (time || "00:00").slice(0, 5).split(":").map(Number);
-  const dt = new Date(Y, M - 1, D, h, m, 0, 0);
-  return dt.getTime() < now.getTime();
-}
-
-// Slots
 function buildSlotsInRange(
   start,
   end,
@@ -52,72 +46,48 @@ function buildSlotsInRange(
   apptsTimes = [],
   blocked = []
 ) {
-  const out = [],
-    apptSet = new Set(apptsTimes),
-    blockedSet = new Set(blocked || []);
-  const S = toMinutes(start),
-    E = toMinutes(end),
-    step = Math.max(5, Number(slotMinutes) || 60);
+  const out = [];
+  const apptSet = new Set(apptsTimes);
+  const blockedSet = new Set(blocked || []);
+  const S = toMinutes(start);
+  const E = toMinutes(end);
+  const step = Math.max(5, Number(slotMinutes) || 60);
+
   for (let t = S; t + step <= E; t += step) {
     const time = toHHMM(t);
     const reserved = apptSet.has(time);
-    const blockedManual = !reserved && blockedSet.has(time);
+    const isBlocked = blockedSet.has(time);
     out.push({
       time,
       reserved,
-      blocked: blockedManual,
-      checked: reserved ? true : !blockedManual,
+      blocked: isBlocked && !reserved,
+      checked: reserved ? true : !isBlocked,
     });
   }
   return out;
 }
 
-// Estado visual
-function computeDisplayStatus(status, isPast) {
-  const raw = (status || "").toString().trim().toLowerCase();
-  const isPaid = /paid|pagad/.test(raw);
-  const isCancelled = /cancel/.test(raw);
-  if (isPast && !isPaid && !isCancelled) return "pending_payment";
-  if (/pending|de pago/.test(raw)) return "pending_payment";
-  if (/proce/.test(raw)) return "in_process";
-  if (/reser/.test(raw)) return "reserved";
-  if (/paid|pagad/.test(raw)) return "paid";
-  if (/cancel/.test(raw)) return "cancelled";
-  return raw || "reserved";
-}
-function StatusPill({ value, isPast }) {
-  const key = computeDisplayStatus(value, isPast);
-  const map = {
-    reserved: { label: "Reservada", cls: "badge badge-reserved" },
-    in_process: { label: "En proceso", cls: "badge badge-process" },
-    pending_payment: { label: "Pendiente de pago", cls: "badge badge-pending" },
-    paid: { label: "Pagada", cls: "badge badge-paid" },
-    cancelled: { label: "Cancelada", cls: "badge badge-cancel" },
-  };
-  const { label, cls } = map[key] || map.reserved;
-  return <span className={cls}>{label}</span>;
-}
-
+/* ===== AdminHome ===== */
 export default function AdminHome() {
   const nav = useNavigate();
 
-  const [tab, setTab] = useState("calendar");
-  const [date, setDate] = useState("");
-  const [isPast, setIsPast] = useState(false);
+  const [tab, setTab] = useState("calendar"); // calendar | clients | appointments
 
+  // Día seleccionado
+  const [date, setDate] = useState("");
+  const [isPastDay, setIsPastDay] = useState(false);
+  const [loadingDay, setLoadingDay] = useState(false);
   const [dayInfo, setDayInfo] = useState(null);
   const [dayAppts, setDayAppts] = useState([]);
-  const [loadingDay, setLoadingDay] = useState(false);
-
-  const [showDayForm, setShowDayForm] = useState(false);
-  const [slotMinutes, setSlotMinutes] = useState(60);
+  const [slots, setSlots] = useState([]);
   const [rangeStart, setRangeStart] = useState("09:00");
   const [rangeEnd, setRangeEnd] = useState("17:00");
-  const [slots, setSlots] = useState([]);
+  const [slotMinutes, setSlotMinutes] = useState(60);
+  const [showDayForm, setShowDayForm] = useState(false);
   const [msg, setMsg] = useState("");
-
   const [reloadToken, setReloadToken] = useState(0);
 
+  // Clientes
   const [clients, setClients] = useState([]);
   const [clientQuery, setClientQuery] = useState("");
   const [newClient, setNewClient] = useState({
@@ -135,21 +105,21 @@ export default function AdminHome() {
   });
   const [savingEdit, setSavingEdit] = useState(false);
 
+  // Ver citas (global)
   const [apptsAll, setApptsAll] = useState([]);
   const [personQuery, setPersonQuery] = useState("");
   const [filterDay, setFilterDay] = useState("");
 
-  // estado para chat modal
-  const [chatClient, setChatClient] = useState(null);
+  function logout() {
+    clearAuth();
+    nav("/", { replace: true });
+  }
 
-  useEffect(() => {
-    if (tab === "clients") loadClients();
-    if (tab === "appointments") loadApptsAll();
-  }, [tab]);
-
+  /* ===== Data loaders ===== */
   async function loadClients() {
     try {
-      setClients(await api.listClients());
+      const rows = await api.listClients();
+      setClients(Array.isArray(rows) ? rows : []);
     } catch (e) {
       console.error(e);
     }
@@ -164,18 +134,12 @@ export default function AdminHome() {
     }
   }
 
-  function logout() {
-    clearAuth();
-    nav("/", { replace: true });
-  }
-
-  // Selección día
+  /* ===== Selección de día en calendario ===== */
   async function pickDay(d, meta = {}) {
     setDate(d);
-    setIsPast(!!meta.isPast);
+    setIsPastDay(!!meta.isPast);
     setMsg("");
     setShowDayForm(false);
-    setSlots([]);
     setLoadingDay(true);
     try {
       const rng = await api.listAvailability(d, d);
@@ -193,100 +157,40 @@ export default function AdminHome() {
       setRangeEnd(end);
       setSlotMinutes(step);
 
-      const apptTimes = apptsList.map((a) => (a.time || "").slice(0, 5));
+      // Ignoramos canceladas (por robustez, aunque ahora las borres)
+      const apptTimes = apptsList
+        .filter((a) => (a.status || "").toLowerCase() !== "cancelled")
+        .map((a) => (a.time || "").slice(0, 5));
       const blocked = info?.blockedSlots || [];
       setSlots(buildSlotsInRange(start, end, step, apptTimes, blocked));
       setShowDayForm(true);
-    } catch {
-      setDayInfo(null);
-      setDayAppts([]);
-      setSlots([]);
+    } catch (e) {
+      console.error(e);
+      setMsg(e.message || "No se ha podido cargar el día.");
     } finally {
       setLoadingDay(false);
     }
   }
 
-  // Regenerar slots
-  useEffect(() => {
-    if (!showDayForm) return;
-    const prev = new Map(slots.map((s) => [s.time, s.checked]));
-    const apptTimes = dayAppts.map((a) => (a.time || "").slice(0, 5));
-    const blocked = dayInfo?.blockedSlots || [];
-    const next = buildSlotsInRange(
-      rangeStart,
-      rangeEnd,
-      slotMinutes,
-      apptTimes,
-      blocked
-    );
-    setSlots(
-      next.map((s) => ({
-        ...s,
-        checked: s.reserved
-          ? true
-          : prev.has(s.time)
-          ? prev.get(s.time)
-          : !s.blocked,
-      }))
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slotMinutes]);
-  useEffect(() => {
-    if (!showDayForm) return;
-    if (toMinutes(rangeEnd) <= toMinutes(rangeStart)) return;
-    const prev = new Map(slots.map((s) => [s.time, s.checked]));
-    const apptTimes = dayAppts.map((a) => (a.time || "").slice(0, 5));
-    const blocked = dayInfo?.blockedSlots || [];
-    const next = buildSlotsInRange(
-      rangeStart,
-      rangeEnd,
-      slotMinutes,
-      apptTimes,
-      blocked
-    );
-    setSlots(
-      next.map((s) => ({
-        ...s,
-        checked: s.reserved
-          ? true
-          : prev.has(s.time)
-          ? prev.get(s.time)
-          : !s.blocked,
-      }))
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rangeStart, rangeEnd]);
-
-  function toggleSlot(i) {
-    setSlots(
-      slots.map((s, idx) =>
-        idx !== i ? s : s.reserved ? s : { ...s, checked: !s.checked }
-      )
-    );
-  }
-  function markAll(v) {
-    setSlots(slots.map((s) => (s.reserved ? s : { ...s, checked: v })));
-  }
-
+  /* ===== Guardar disponibilidad del día ===== */
   async function saveDay(e) {
     e.preventDefault();
     if (!date) return;
     setMsg("");
     if (toMinutes(rangeEnd) <= toMinutes(rangeStart)) {
-      setMsg("El rango debe tener fin mayor que el inicio.");
+      setMsg("El rango debe terminar después del inicio.");
       return;
     }
-
     const checkedCount = slots.filter((s) => s.checked && !s.reserved).length;
     const willBeActive = checkedCount > 0;
     if (dayAppts.length > 0 && !willBeActive) {
       alert(`No puedes cerrar ${date}: hay ${dayAppts.length} cita(s).`);
       return;
     }
-
     const blockedSlots = slots
       .filter((s) => !s.reserved && !s.checked)
       .map((s) => s.time);
+
     try {
       await api.setAvailability({
         date,
@@ -296,103 +200,102 @@ export default function AdminHome() {
         isActive: willBeActive,
         blockedSlots,
       });
-      setMsg("Día actualizado correctamente.");
-      setReloadToken((t) => t + 1);
+      setMsg("Día actualizado.");
+      setReloadToken((x) => x + 1);
     } catch (e) {
-      setMsg(e.message);
+      setMsg(e.message || "No se han podido guardar los cambios.");
     }
   }
 
-  // Filtros
-  const filteredClients = useMemo(() => {
-    const q = norm(clientQuery);
-    if (!q) return clients;
-    return clients.filter((c) =>
-      norm(
-        `${c.firstName || ""} ${c.lastName || ""} ${c.phone || ""} ${
-          c.reason || ""
-        }`
-      ).includes(q)
-    );
-  }, [clients, clientQuery]);
-
-  const filteredAppts = useMemo(() => {
-    const q = norm(personQuery),
-      d = (filterDay || "").trim();
-    const list = (apptsAll || []).filter((a) => {
-      if (q && !norm(getClientName(a)).includes(q)) return false;
-      if (d && a?.date !== d) return false;
-      return true;
-    });
-    return list.sort((x, y) =>
-      `${x.date} ${x.time || ""}`.localeCompare(`${y.date} ${y.time || ""}`)
-    );
-  }, [apptsAll, personQuery, filterDay]);
-
-  // ====== TICK "Pagado" ======
+  /* ===== Pagado ✓ ===== */
   async function togglePaid(appt, checked) {
-    let nextStatus = "paid";
-    if (!checked) {
-      nextStatus = isPastDateTime(appt.date, appt.time)
-        ? "pending_payment"
-        : "reserved";
-    }
+    const nextStatus = checked
+      ? "paid"
+      : isPastDateTime(appt.date, appt.time)
+      ? "pending_payment"
+      : "reserved";
     try {
       const updated = await api.updateAppointment(appt._id, {
         status: nextStatus,
       });
+      const status = updated?.status || nextStatus;
+
       setApptsAll((prev) =>
-        prev.map((a) =>
-          a._id === appt._id
-            ? { ...a, status: updated?.status || nextStatus }
-            : a
-        )
+        prev.map((a) => (a._id === appt._id ? { ...a, status } : a))
       );
       setDayAppts((prev) =>
-        prev.map((a) =>
-          a._id === appt._id
-            ? { ...a, status: updated?.status || nextStatus }
-            : a
-        )
+        prev.map((a) => (a._id === appt._id ? { ...a, status } : a))
       );
     } catch (e) {
       alert(e.message || "No se pudo actualizar el estado.");
     }
   }
 
+  /* ===== Cancelar = borrar cita ===== */
+  async function cancelAppointment(appt) {
+    if (!confirm("¿Cancelar esta cita?")) return;
+    try {
+      await api.deleteAppointment(appt._id); // borrar en BD
+      setApptsAll((prev) => prev.filter((x) => x._id !== appt._id));
+      setDayAppts((prev) => prev.filter((x) => x._id !== appt._id));
+
+      // Si el calendario está en ese día, recomputar slots para que la franja quede libre
+      if (date && appt.date === date) {
+        await pickDay(date, { isPast: isPastDay });
+      }
+    } catch (e) {
+      alert(e.message || "No se pudo cancelar la cita.");
+    }
+  }
+
+  /* ===== Effects ===== */
+  useEffect(() => {
+    if (tab === "clients") loadClients();
+    if (tab === "appointments") loadApptsAll();
+  }, [tab]);
+
+  /* ===== Derivados ===== */
+  const apptsFiltered = useMemo(() => {
+    let list = [...apptsAll];
+    if (personQuery.trim()) {
+      const q = norm(personQuery);
+      list = list.filter((a) => norm(getClientName(a)).includes(q));
+    }
+    if (filterDay) {
+      list = list.filter((a) => (a.date || "").startsWith(filterDay));
+    }
+    return list.sort((x, y) =>
+      `${x.date} ${x.time || ""}`.localeCompare(`${y.date} ${y.time || ""}`)
+    );
+  }, [apptsAll, personQuery, filterDay]);
+
   return (
     <>
-      {/* Salir */}
-      <div
-        className="logout-box"
-        onClick={() => {
-          clearAuth();
-          nav("/", { replace: true });
-        }}
-      >
-        <span>Salir</span>
-      </div>
+      <div className="topbar">
+        <div className="logout-box" onClick={logout}>
+          <span>Salir</span>
+        </div>
 
-      {/* Tabs */}
-      <div className="nav" style={{ marginTop: 8 }}>
-        <button
-          className={`btn ${tab === "calendar" ? "primary" : ""}`}
-          onClick={() => setTab("calendar")}
-        >
-          Calendario
-        </button>
-        <button
-          className={`btn ${tab === "clients" ? "primary" : ""}`}
-          onClick={() => setTab("clients")}
-        >
-          Ver clientes
-        </button>
-        <button
-          className={`btn ${tab === "appointments" ? "primary" : ""}`}
-          onClick={() => setTab("appointments")}
-        >
-          Ver citas
-        </button>
+        <div className="tabs">
+          <button
+            className={`btn ${tab === "calendar" ? "primary" : ""}`}
+            onClick={() => setTab("calendar")}
+          >
+            Calendario
+          </button>
+          <button
+            className={`btn ${tab === "clients" ? "primary" : ""}`}
+            onClick={() => setTab("clients")}
+          >
+            Ver clientes
+          </button>
+          <button
+            className={`btn ${tab === "appointments" ? "primary" : ""}`}
+            onClick={() => setTab("appointments")}
+          >
+            Ver citas
+          </button>
+        </div>
       </div>
 
       {/* ===== CALENDARIO ===== */}
@@ -400,11 +303,12 @@ export default function AdminHome() {
         <div className="row">
           <div className="card">
             <h3>Calendario</h3>
+
             <MonthCalendar
               onPickDay={pickDay}
               adminMode={true}
               reloadToken={reloadToken}
-              selectedDate={date}
+              selectedDate={date} // pinta el morado en el día escogido
             />
 
             {date && (
@@ -421,13 +325,15 @@ export default function AdminHome() {
                   Día seleccionado: <strong>{date}</strong>
                   {loadingDay ? " …" : ""}
                 </span>
-                {isPast ? (
+                {isPastDay ? (
                   <span className="pill">Día pasado (solo lectura)</span>
+                ) : dayInfo ? (
+                  <span className="pill">
+                    Edita la configuración en el panel
+                  </span>
                 ) : (
                   <span className="pill">
-                    {dayInfo
-                      ? "Edita la configuración en el panel"
-                      : "Configura el día con el panel de la derecha"}
+                    Configura el día con el panel de la derecha
                   </span>
                 )}
               </div>
@@ -451,17 +357,13 @@ export default function AdminHome() {
                   </thead>
                   <tbody>
                     {dayAppts.map((a) => {
-                      const pastRow = isPastDateTime(a.date || date, a.time);
-                      const isPaid =
-                        computeDisplayStatus(a.status, pastRow) === "paid";
+                      const isPaid = (a.status || "").toLowerCase() === "paid";
                       return (
                         <tr key={a._id}>
                           <td>{(a.time || "").slice(0, 5)}</td>
                           <td>{getClientName(a) || "—"}</td>
                           <td>{a.clientId?.reason || "—"}</td>
-                          <td>
-                            <StatusPill value={a.status} isPast={pastRow} />
-                          </td>
+                          <td>{a.status || "—"}</td>
                           <td>
                             <input
                               type="checkbox"
@@ -478,16 +380,13 @@ export default function AdminHome() {
             </div>
           </div>
 
-          {/* Editor del día */}
-          {showDayForm && (
+          {/* Panel de configuración del día */}
+          {date && (
             <div className="card">
               <h3 style={{ marginBottom: 8 }}>
-                {dayInfo ? "Editar día" : "Configurar día"}: {date || "—"}
-                {isPast && (
-                  <span className="pill" style={{ marginLeft: 8 }}>
-                    Solo lectura
-                  </span>
-                )}
+                {dayInfo
+                  ? "Editar disponibilidad del día"
+                  : "Configurar disponibilidad del día"}
               </h3>
 
               <form onSubmit={saveDay}>
@@ -498,7 +397,7 @@ export default function AdminHome() {
                       type="time"
                       value={rangeStart}
                       onChange={(e) => setRangeStart(e.target.value)}
-                      disabled={isPast}
+                      disabled={isPastDay}
                     />
                   </div>
                   <div>
@@ -507,7 +406,7 @@ export default function AdminHome() {
                       type="time"
                       value={rangeEnd}
                       onChange={(e) => setRangeEnd(e.target.value)}
-                      disabled={isPast}
+                      disabled={isPastDay}
                     />
                   </div>
                 </div>
@@ -521,7 +420,7 @@ export default function AdminHome() {
                       min={5}
                       step={5}
                       onChange={(e) => setSlotMinutes(e.target.value)}
-                      disabled={isPast}
+                      disabled={isPastDay}
                     />
                     <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
                       {[15, 30, 45, 60].map((n) => (
@@ -530,7 +429,7 @@ export default function AdminHome() {
                           className="btn"
                           key={n}
                           onClick={() => setSlotMinutes(n)}
-                          disabled={isPast}
+                          disabled={isPastDay}
                         >
                           {n} min
                         </button>
@@ -547,82 +446,78 @@ export default function AdminHome() {
                   </div>
                 </div>
 
-                <div
-                  style={{
-                    marginTop: 12,
-                    display: "flex",
-                    gap: 8,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => markAll(true)}
-                    disabled={isPast}
+                <div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      marginBottom: 6,
+                    }}
                   >
-                    Marcar todo
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => markAll(false)}
-                    disabled={isPast}
-                  >
-                    Bloquear todo
-                  </button>
-                </div>
+                    <strong>Franjas del día</strong>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() =>
+                        setSlots((prev) =>
+                          prev.map((s) =>
+                            s.reserved ? s : { ...s, checked: true }
+                          )
+                        )
+                      }
+                      disabled={isPastDay}
+                    >
+                      Marcar todo
+                    </button>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() =>
+                        setSlots((prev) =>
+                          prev.map((s) =>
+                            s.reserved ? s : { ...s, checked: false }
+                          )
+                        )
+                      }
+                      disabled={isPastDay}
+                    >
+                      Desmarcar todo
+                    </button>
+                  </div>
 
-                <div style={{ marginTop: 14 }}>
-                  <h4 style={{ marginBottom: 8 }}>
-                    Franjas {rangeStart}–{rangeEnd}
-                  </h4>
                   <div className="slots" style={{ gap: 10 }}>
-                    {slots.length === 0 && (
-                      <p style={{ opacity: 0.7 }}>
-                        No hay franjas que quepan con esta duración.
-                      </p>
-                    )}
-                    {slots.map((s, i) => (
+                    {slots.map((s) => (
                       <label
-                        key={s.time}
-                        className="slot"
-                        title={
-                          s.reserved
-                            ? "Hora reservada"
-                            : s.checked
-                            ? "Disponible"
-                            : "Bloqueada"
-                        }
+                        key={`${date}-${s.time}`}
+                        className={`slot ${
+                          s.reserved ? "busy" : s.checked ? "free" : "blocked"
+                        }`}
                         style={{
-                          borderColor: s.reserved
-                            ? "#f97316"
-                            : s.checked
-                            ? "#22c55e"
-                            : "#64748b",
-                          background: s.reserved
-                            ? "rgba(249,115,22,.12)"
-                            : s.checked
-                            ? "rgba(34,197,94,.10)"
-                            : "rgba(100,116,139,.10)",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 8,
-                          opacity: isPast ? 0.65 : 1,
+                          cursor:
+                            s.reserved || isPastDay ? "not-allowed" : "pointer",
                         }}
                       >
                         <input
                           type="checkbox"
+                          disabled={s.reserved || isPastDay}
                           checked={s.checked}
-                          onChange={() => toggleSlot(i)}
-                          disabled={s.reserved || isPast}
+                          onChange={() =>
+                            setSlots((prev) =>
+                              prev.map((x) =>
+                                x.time === s.time
+                                  ? { ...x, checked: !x.checked }
+                                  : x
+                              )
+                            )
+                          }
                         />
                         <span style={{ minWidth: 56, display: "inline-block" }}>
                           {s.time}
                         </span>
                         {s.reserved && (
-                          <span style={{ fontSize: 12, color: "#f59e0b" }}>
-                            ⛔ Hora reservada
+                          <span style={{ fontSize: 12, opacity: 0.8 }}>
+                            ✅ Reservada
                           </span>
                         )}
                         {!s.reserved && !s.checked && (
@@ -637,7 +532,7 @@ export default function AdminHome() {
 
                 <button
                   className="btn primary"
-                  disabled={!date || isPast}
+                  disabled={!date || isPastDay}
                   style={{ marginTop: 10 }}
                 >
                   Guardar
@@ -658,81 +553,81 @@ export default function AdminHome() {
             <div>
               <label>Buscar</label>
               <input
-                placeholder="Nombre, apellidos, teléfono o motivo…"
+                placeholder="Nombre o apellidos…"
                 value={clientQuery}
                 onChange={(e) => setClientQuery(e.target.value)}
               />
             </div>
-          </div>
-
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const c = await api.createClient(newClient);
-              setClients([c, ...clients]);
-              setNewClient({
-                firstName: "",
-                lastName: "",
-                phone: "",
-                reason: "",
-              });
-            }}
-          >
-            <div className="row">
-              <div>
-                <label>Nombre</label>
+            <div style={{ flex: 1 }} />
+            <div>
+              <label>Nuevo cliente</label>
+              <div className="row">
                 <input
+                  placeholder="Nombre"
                   value={newClient.firstName}
                   onChange={(e) =>
                     setNewClient({ ...newClient, firstName: e.target.value })
                   }
                 />
-              </div>
-              <div>
-                <label>Apellidos</label>
                 <input
+                  placeholder="Apellidos"
                   value={newClient.lastName}
                   onChange={(e) =>
                     setNewClient({ ...newClient, lastName: e.target.value })
                   }
                 />
               </div>
-            </div>
-            <div className="row">
-              <div>
-                <label>Teléfono</label>
+              <div className="row">
                 <input
+                  placeholder="Teléfono"
                   value={newClient.phone}
                   onChange={(e) =>
                     setNewClient({ ...newClient, phone: e.target.value })
                   }
                 />
-              </div>
-              <div>
-                <label>Motivo</label>
                 <input
+                  placeholder="Motivo"
                   value={newClient.reason}
                   onChange={(e) =>
                     setNewClient({ ...newClient, reason: e.target.value })
                   }
                 />
               </div>
+              <button
+                className="btn"
+                onClick={async () => {
+                  const created = await api.createClient(newClient);
+                  setClients((prev) => [...prev, created]);
+                  setNewClient({
+                    firstName: "",
+                    lastName: "",
+                    phone: "",
+                    reason: "",
+                  });
+                }}
+              >
+                Añadir
+              </button>
             </div>
-            <button className="btn">Añadir</button>
-          </form>
+          </div>
 
-          <div className="table-wrap" style={{ marginTop: 12 }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Nombre</th>
-                  <th>Teléfono</th>
-                  <th>Motivo</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredClients.map((c) => {
+          <table>
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Teléfono</th>
+                <th>Motivo</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {clients
+                .filter((c) => {
+                  const q = norm(clientQuery);
+                  if (!q) return true;
+                  return norm(`${c.firstName} ${c.lastName}`).includes(q);
+                })
+                .map((c) => {
                   const edit = editingId === c._id;
                   return (
                     <tr key={c._id}>
@@ -796,27 +691,20 @@ export default function AdminHome() {
                         {edit ? (
                           <>
                             <button
-                              className="btn primary"
+                              className="btn"
                               disabled={savingEdit}
                               onClick={async () => {
-                                setSavingEdit(true);
                                 try {
-                                  const u = await api.updateClient(
-                                    c._id,
-                                    editForm
-                                  );
-                                  setClients(
-                                    clients.map((x) =>
-                                      x._id === c._id ? u : x
+                                  setSavingEdit(true);
+                                  await api.updateClient(c._id, editForm);
+                                  setClients((prev) =>
+                                    prev.map((x) =>
+                                      x._id === c._id
+                                        ? { ...x, ...editForm }
+                                        : x
                                     )
                                   );
                                   setEditingId(null);
-                                  setEditForm({
-                                    firstName: "",
-                                    lastName: "",
-                                    phone: "",
-                                    reason: "",
-                                  });
                                 } finally {
                                   setSavingEdit(false);
                                 }
@@ -826,15 +714,7 @@ export default function AdminHome() {
                             </button>
                             <button
                               className="btn"
-                              onClick={() => {
-                                setEditingId(null);
-                                setEditForm({
-                                  firstName: "",
-                                  lastName: "",
-                                  phone: "",
-                                  reason: "",
-                                });
-                              }}
+                              onClick={() => setEditingId(null)}
                             >
                               Cancelar
                             </button>
@@ -860,18 +740,19 @@ export default function AdminHome() {
                               onClick={async () => {
                                 if (!confirm("¿Borrar este cliente?")) return;
                                 await api.deleteClient(c._id);
-                                setClients(
-                                  clients.filter((x) => x._id !== c._id)
+                                setClients((prev) =>
+                                  prev.filter((x) => x._id !== c._id)
                                 );
                               }}
                             >
                               Borrar
                             </button>
-                            {/* Botón Chat */}
                             <button
                               className="btn"
-                              onClick={() => setChatClient(c)}
-                              title="Abrir chat con este cliente"
+                              onClick={() => {
+                                /* opcional chat */
+                              }}
+                              title="Chat"
                             >
                               Chat
                             </button>
@@ -881,32 +762,8 @@ export default function AdminHome() {
                     </tr>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Modal Chat */}
-          {chatClient && (
-            <div
-              style={{
-                position: "fixed",
-                inset: 0,
-                display: "grid",
-                placeItems: "center",
-                background: "rgba(0,0,0,.45)",
-                zIndex: 50,
-              }}
-              onClick={() => setChatClient(null)}
-            >
-              <div onClick={(e) => e.stopPropagation()}>
-                <ChatBox
-                  room={`client:${chatClient._id}`}
-                  title={`Chat con ${chatClient.firstName} ${chatClient.lastName}`}
-                  onClose={() => setChatClient(null)}
-                />
-              </div>
-            </div>
-          )}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -917,9 +774,9 @@ export default function AdminHome() {
 
           <div className="row" style={{ marginBottom: 8 }}>
             <div>
-              <label>Persona (filtra al escribir)</label>
+              <label>Persona</label>
               <input
-                placeholder="Escribe nombre o apellidos…"
+                placeholder="Nombre o apellidos…"
                 value={personQuery}
                 onChange={(e) => setPersonQuery(e.target.value)}
               />
@@ -934,7 +791,7 @@ export default function AdminHome() {
             </div>
           </div>
 
-          <div className="table-wrap">
+          <div style={{ overflowX: "auto" }}>
             <table>
               <thead>
                 <tr>
@@ -944,29 +801,19 @@ export default function AdminHome() {
                   <th>Motivo</th>
                   <th>Situación</th>
                   <th>Pagado ✓</th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredAppts.length === 0 && (
-                  <tr>
-                    <td colSpan="6" style={{ opacity: 0.8 }}>
-                      Sin resultados para el filtro.
-                    </td>
-                  </tr>
-                )}
-                {filteredAppts.map((a) => {
-                  const pastRow = isPastDateTime(a.date, a.time);
-                  const isPaid =
-                    computeDisplayStatus(a.status, pastRow) === "paid";
+                {apptsFiltered.map((a) => {
+                  const isPaid = (a.status || "").toLowerCase() === "paid";
                   return (
                     <tr key={a._id}>
                       <td>{fmtDDMMYYYY(a.date)}</td>
                       <td>{(a.time || "").slice(0, 5)}</td>
                       <td>{getClientName(a) || "—"}</td>
                       <td>{a.clientId?.reason || "—"}</td>
-                      <td>
-                        <StatusPill value={a.status} isPast={pastRow} />
-                      </td>
+                      <td>{a.status || "—"}</td>
                       <td>
                         <input
                           type="checkbox"
@@ -974,6 +821,14 @@ export default function AdminHome() {
                           onChange={(e) => togglePaid(a, e.target.checked)}
                           title="Marcar como pagado"
                         />
+                      </td>
+                      <td>
+                        <button
+                          className="btn"
+                          onClick={() => cancelAppointment(a)}
+                        >
+                          Cancelar
+                        </button>
                       </td>
                     </tr>
                   );

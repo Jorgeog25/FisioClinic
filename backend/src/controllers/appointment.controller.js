@@ -87,30 +87,27 @@ exports.summary = async (req, res, next) => {
 // body: { date:"YYYY-MM-DD", time:"HH:mm", clientId, status? }
 exports.create = async (req, res, next) => {
   try {
-    const { date, time, clientId, status } = req.body;
+    let { date, time, clientId } = req.body;
+    if (!clientId && req.user?.clientId) clientId = req.user.clientId;
     if (!date || !time || !clientId) {
       return res
         .status(400)
         .json({ error: "date, time y clientId son obligatorios" });
     }
 
-    // Evitar duplicado misma hora
-    const clash = await Appointment.findOne({ date, time, clientId });
-    if (clash)
-      return res
-        .status(409)
-        .json({ error: "Ya existe una cita para ese cliente a esa hora" });
+    // Bloqueo: ¿ya hay una cita en esa franja?
+    const clash = await Appointment.findOne({ date, time });
+    if (clash) {
+      return res.status(409).json({ error: "Esa hora ya está reservada." });
+    }
 
-    const appt = await Appointment.create({
+    const created = await Appointment.create({
       date,
-      time: toHHMM(time),
+      time,
       clientId,
-      status: status || "reserved",
+      status: "reserved",
     });
-    const saved = await Appointment.findById(appt._id)
-      .populate("clientId", "firstName lastName reason")
-      .lean();
-    res.status(201).json(normalizeAppointment(saved));
+    res.status(201).json(created);
   } catch (e) {
     next(e);
   }
@@ -120,25 +117,62 @@ exports.update = async (req, res, next) => {
   try {
     const { id } = req.params;
     const patch = {};
-    if (typeof req.body.status === 'string') patch.status = req.body.status;
+    if (typeof req.body.status === "string") patch.status = req.body.status;
 
-    const upd = await Appointment.findByIdAndUpdate(id, { $set: patch }, { new: true })
-      .populate('clientId','firstName lastName reason')
+    const upd = await Appointment.findByIdAndUpdate(
+      id,
+      { $set: patch },
+      { new: true }
+    )
+      .populate("clientId", "firstName lastName reason")
       .lean();
 
-    if (!upd) return res.status(404).json({ error: 'Cita no encontrada' });
+    if (!upd) return res.status(404).json({ error: "Cita no encontrada" });
 
     res.json({
       _id: upd._id,
       date: upd.date,
-      time: (upd.time||'').slice(0,5),
+      time: (upd.time || "").slice(0, 5),
       status: upd.status,
-      clientId: upd.clientId ? {
-        _id: upd.clientId._id,
-        firstName: upd.clientId.firstName || '',
-        lastName:  upd.clientId.lastName  || '',
-        reason:    upd.clientId.reason    || '',
-      } : null
+      clientId: upd.clientId
+        ? {
+            _id: upd.clientId._id,
+            firstName: upd.clientId.firstName || "",
+            lastName: upd.clientId.lastName || "",
+            reason: upd.clientId.reason || "",
+          }
+        : null,
     });
-  } catch (e) { next(e); }
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.myHistory = async (req, res, next) => {
+  try {
+    const clientId = req.user?.clientId || req.query.clientId; // por si usas token opcional
+    if (!clientId)
+      return res.status(403).json({ error: "Solo clientes autenticados" });
+
+    const rows = await Appointment.find({ clientId })
+      .sort({ date: 1, time: 1 })
+      .populate("clientId", "firstName lastName reason")
+      .lean();
+
+    res.json(rows.map(normalizeAppointment));
+  } catch (e) {
+    next(e);
+  }
+};
+
+// Borrar cita
+exports.remove = async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    const doc = await Appointment.findByIdAndDelete(id);
+    if (!doc) return res.status(404).json({ error: "Cita no encontrada" });
+    res.json({ ok: true, _id: id });
+  } catch (e) {
+    next(e);
+  }
 };

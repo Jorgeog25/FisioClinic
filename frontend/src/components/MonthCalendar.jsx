@@ -17,7 +17,7 @@ export default function MonthCalendar({
   onPickDay,
   adminMode = false,
   reloadToken = 0,
-  selectedDate = "", // 👈 NUEVO: fecha seleccionada (YYYY-MM-DD)
+  selectedDate = "", // 👈 NUEVO: resaltado del día elegido
 }) {
   const [monthStart, setMonthStart] = useState(
     new Date(new Date().getFullYear(), new Date().getMonth(), 1)
@@ -75,7 +75,6 @@ export default function MonthCalendar({
     onPickDay && onPickDay(key, { isPast });
   }
 
-  // 🔘 Botón para volver al mes y día actual
   function goToday() {
     const now = new Date();
     setMonthStart(new Date(now.getFullYear(), now.getMonth(), 1));
@@ -112,18 +111,10 @@ export default function MonthCalendar({
             ▶
           </button>
         </div>
-        {/* 🔘 Botón Hoy */}
         <button
           onClick={goToday}
           className="btn"
-          style={{
-            fontSize: "0.85rem",
-            padding: "6px 10px",
-            background: "#22c55e",
-            borderColor: "#16a34a",
-            color: "#fff",
-            fontWeight: 600,
-          }}
+          style={{ fontSize: ".85rem", padding: "6px 10px" }}
           title="Volver al día de hoy"
         >
           Hoy
@@ -144,7 +135,7 @@ export default function MonthCalendar({
           const isToday = key === todayStr;
           const isPast = ymdNum(key) < todayNum;
           const hadAppts = isPast && pastWithAppts[key] > 0;
-          const isSelected = selectedDate && key === selectedDate; // 👈 NUEVO
+          const isSelected = selectedDate && key === selectedDate; // 👈
 
           let cls = "day";
           if (hadAppts) cls += " past-appts";
@@ -152,7 +143,7 @@ export default function MonthCalendar({
           else if (isActive) cls += " active";
           else cls += " inactive";
           if (isToday) cls += " today";
-          if (isSelected) cls += " selected"; // 👈 NUEVO
+          if (isSelected) cls += " selected"; // 👈 aplica el morado
 
           const title = hadAppts
             ? "Día pasado con citas"

@@ -14,4 +14,8 @@ router.post('/', auth(true), ctrl.create);
 // 🔧 NUEVO: Actualizar cita (por ejemplo marcar como pagada)
 router.patch('/:id', auth(true), requireRole('admin'), ctrl.update);
 
+router.get('/me', auth(true), ctrl.myHistory);
+
+router.delete('/:id', auth(true), ctrl.remove);
+
 module.exports = router;
