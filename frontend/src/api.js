@@ -1,4 +1,7 @@
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
+const GRAPHQL =
+  import.meta.env.VITE_GRAPHQL_URL || "http://localhost:4000/graphql";
+
 const STORAGE = window.sessionStorage;
 
 const LAST_ACTIVITY_KEY = "lastActivity";
@@ -10,11 +13,13 @@ export function saveAuth(token, user) {
   STORAGE.setItem(USER_KEY, JSON.stringify(user));
   touchActivity();
 }
+
 export function clearAuth() {
   STORAGE.removeItem(TOKEN_KEY);
   STORAGE.removeItem(USER_KEY);
   STORAGE.removeItem(LAST_ACTIVITY_KEY);
 }
+
 export function getUser() {
   try {
     const raw = STORAGE.getItem(USER_KEY);
@@ -23,9 +28,11 @@ export function getUser() {
     return null;
   }
 }
+
 export function touchActivity() {
   STORAGE.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
 }
+
 export function lastActivity() {
   const v = STORAGE.getItem(LAST_ACTIVITY_KEY);
   return v ? Number(v) : 0;
@@ -33,6 +40,7 @@ export function lastActivity() {
 
 async function request(path, { method = "GET", body, headers } = {}) {
   touchActivity();
+
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: {
@@ -50,6 +58,7 @@ async function request(path, { method = "GET", body, headers } = {}) {
     window.location.replace("/");
     return;
   }
+
   if (!res.ok) {
     let msg = res.statusText;
     try {
@@ -58,6 +67,7 @@ async function request(path, { method = "GET", body, headers } = {}) {
     } catch {}
     throw new Error(msg);
   }
+
   try {
     return await res.json();
   } catch {
@@ -83,6 +93,7 @@ function toHHMM(s) {
   }
   return s;
 }
+
 function normalizeClientShape(a) {
   if (
     a?.clientId &&
@@ -116,6 +127,7 @@ function normalizeClientShape(a) {
   }
   return a?.clientId || null;
 }
+
 function normalizeAppointment(a) {
   const clientId = normalizeClientShape(a);
   return {
@@ -126,6 +138,7 @@ function normalizeAppointment(a) {
     clientId,
   };
 }
+
 function extractArray(payload) {
   if (Array.isArray(payload)) return payload;
   if (!payload || typeof payload !== "object") return [];
@@ -139,11 +152,14 @@ function extractArray(payload) {
   );
 }
 
+/* ===== REST API ===== */
 export const api = {
   // auth
   login: (email, password) =>
     request("/auth/login", { method: "POST", body: { email, password } }),
+
   me: () => request("/auth/me"),
+
   registerClient: (payload) =>
     request("/auth/register-client", { method: "POST", body: payload }),
 
@@ -158,6 +174,7 @@ export const api = {
     const r = await request(url);
     return Array.isArray(r) ? r : [];
   },
+
   setAvailability: (payload) =>
     request("/availability", { method: "POST", body: payload }),
 
@@ -166,14 +183,21 @@ export const api = {
     const r = await request(`/appointments?date=${date}`);
     return extractArray(r).map(normalizeAppointment);
   },
+
   createAppointment: (payload) =>
     request("/appointments", { method: "POST", body: payload }),
+
   updateAppointment: (id, payload) =>
-    request(`/appointments/${id}`, { method: "PATCH", body: payload }), // 👈 NUEVO
+    request(`/appointments/${id}`, { method: "PATCH", body: payload }),
+
+  deleteAppointment: (id) =>
+    request(`/appointments/${id}`, { method: "DELETE" }),
+
   myHistory: async () => {
     const r = await request("/appointments/me");
     return extractArray(r).map(normalizeAppointment);
   },
+
   appointmentsSummary: async (from, to) => {
     const r = await request(
       `/appointments/summary?from=${from}&to=${to}&populate=1`
@@ -183,15 +207,41 @@ export const api = {
 
   // clients
   listClients: () => request("/clients"),
+
   createClient: (payload) =>
     request("/clients", { method: "POST", body: payload }),
+
   updateClient: (id, payload) =>
     request(`/clients/${id}`, { method: "PUT", body: payload }),
-  deleteClient: (id) => request(`/clients/${id}`, { method: "DELETE" }),
 
+  deleteClient: (id) =>
+    request(`/clients/${id}`, { method: "DELETE" }),
+
+  // chat
   chatHistory: (room, limit = 50) =>
     request(`/chat/${encodeURIComponent(room)}/history?limit=${limit}`),
-
-    deleteAppointment: (id) =>
-    request(`/appointments/${id}`, { method: 'DELETE' }),
 };
+
+/* ===== GRAPHQL ===== */
+export async function graphqlRequest(query, variables = {}) {
+  touchActivity();
+
+  const res = await fetch(GRAPHQL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(STORAGE.getItem(TOKEN_KEY)
+        ? { Authorization: "Bearer " + STORAGE.getItem(TOKEN_KEY) }
+        : {}),
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+
+  const json = await res.json();
+
+  if (json.errors && json.errors.length) {
+    throw new Error(json.errors[0].message);
+  }
+
+  return json.data;
+}

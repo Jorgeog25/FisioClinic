@@ -4,6 +4,14 @@ const morgan = require("morgan");
 const cors = require("cors");
 const http = require("http");
 const jwt = require("jsonwebtoken");
+const { ApolloServer } = require("@apollo/server");
+
+const typeDefs = require("./src/graphql/schema");
+const resolvers = require("./src/graphql/resolvers");
+const { auth } = require("./src/middleware/auth");
+
+
+
 
 const connectDB = require("./src/config/db");
 
@@ -116,6 +124,43 @@ io.on("connection", (socket) => {
     }
   });
 });
+
+/* ================= GraphQL ================= */
+async function startGraphQL() {
+  const apolloServer = new ApolloServer({
+    typeDefs: require("./src/graphql/schema"),
+    resolvers: require("./src/graphql/resolvers"),
+  });
+
+  await apolloServer.start();
+
+  app.post(
+    "/graphql",
+    auth(),
+    express.json(),
+    async (req, res) => {
+      const response = await apolloServer.executeOperation(
+        {
+          query: req.body.query,
+          variables: req.body.variables,
+        },
+        {
+          contextValue: {
+            user: {
+             ...req.user,
+              clientId: req.user?.clientId,
+            },
+          },
+        }
+      );
+
+      res.status(200).json(response);
+    }
+  );
+}
+
+startGraphQL();
+
 
 server.listen(PORT, () =>
   console.log(`Fisio Clinic API + Socket.IO running on http://localhost:${PORT}`)

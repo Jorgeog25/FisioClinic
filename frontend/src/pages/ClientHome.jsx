@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import MonthCalendar from "../components/MonthCalendar";
 import ChatBox from "../components/ChatBox";
-import { api, clearAuth, getUser } from "../api";
+import { api, clearAuth, getUser, graphqlRequest } from "../api";
 
 // ===== Utils =====
 function toMinutes(hhmm) {
@@ -49,12 +49,13 @@ export default function ClientHome() {
   const nav = useNavigate();
 
   const [date, setDate] = useState("");
-  const [slots, setSlots] = useState([]); // array de strings "HH:MM"
+  const [slots, setSlots] = useState([]);
   const [selectedTime, setSelectedTime] = useState("");
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
   const [history, setHistory] = useState([]);
+  const [cartOpen, setCartOpen] = useState(false);
 
   const me = getUser();
   const myRoom = me?.clientId ? `client:${me.clientId}` : null;
@@ -64,7 +65,7 @@ export default function ClientHome() {
     nav("/", { replace: true });
   }
 
-  // Carga historial al entrar
+  // ===== Cargar historial =====
   useEffect(() => {
     api
       .myHistory()
@@ -72,7 +73,7 @@ export default function ClientHome() {
       .catch(() => {});
   }, []);
 
-  // Cargar huecos del día seleccionado usando las mismas APIs que Admin
+  // ===== Cargar slots =====
   async function fetchSlots(day) {
     setDate(day);
     setMsg("");
@@ -82,13 +83,11 @@ export default function ClientHome() {
 
     setLoading(true);
     try {
-      // 1) Disponibilidad del día
       const avail = await api.listAvailability(day, day);
       const info = Array.isArray(avail)
         ? avail.find((x) => x.date === day)
         : null;
 
-      // Si no hay configuración para el día -> no hay horas
       if (!info || info.isActive === false) {
         setSlots([]);
         return;
@@ -99,16 +98,16 @@ export default function ClientHome() {
       const step = info.slotMinutes || 60;
       const blocked = info.blockedSlots || [];
 
-      // 2) Citas ya reservadas de ese día
       const appts = await api.listAppointments(day);
       const apptTimes = (Array.isArray(appts) ? appts : [])
-        .filter((a) => (a.status || "").toLowerCase() !== "cancelled") // 👈 ignora canceladas
+        .filter(
+          (a) =>
+            a.date === day &&
+            (a.status || "").toLowerCase() !== "cancelled"
+        )
         .map((a) => (a.time || "").slice(0, 5));
 
-      // 3) Construir huecos libres
       let free = buildSlotsInRange(start, end, step, apptTimes, blocked);
-
-      // 4) Si el día es hoy, filtra horas ya pasadas
       free = free.filter((t) => !isPastDateTime(day, t));
 
       setSlots(free);
@@ -120,27 +119,55 @@ export default function ClientHome() {
     }
   }
 
+  // ===== Reservar → carrito =====
   async function confirmBooking() {
     if (!date || !selectedTime) return;
     setMsg("");
     try {
-      const user = getUser(); // viene de tu api.js
       await api.createAppointment({
         date,
         time: selectedTime,
-        clientId: user?.clientId, // 👈 obligatorio si el backend aún lo exige
+        clientId: me?.clientId,
+        status: "pending_payment", // 👈 CLAVE
       });
-      setMsg("Cita reservada correctamente.");
+      setMsg("Cita añadida al carrito.");
       setSelectedTime("");
-      await fetchSlots(date); // recarga huecos
       const hist = await api.myHistory();
       setHistory(Array.isArray(hist) ? hist : []);
+      await fetchSlots(date);
     } catch (e) {
       setMsg(e.message || "No se ha podido crear la cita.");
     }
   }
 
-  // Etiqueta auxiliar
+  // ===== Carrito (derivado) =====
+  const cart = useMemo(
+    () => (history || []).filter((a) => a.status === "pending_payment"),
+    [history]
+  );
+
+  const total = cart.length * 30;
+
+  // ===== Pagar carrito =====
+  async function payCart() {
+    try {
+      await graphqlRequest(`
+        mutation {
+          payCart {
+            total
+            status
+          }
+        }
+      `);
+      const hist = await api.myHistory();
+      setHistory(Array.isArray(hist) ? hist : []);
+      setCartOpen(false);
+      setMsg("Pago realizado correctamente.");
+    } catch (e) {
+      setMsg(e.message || "Error al pagar.");
+    }
+  }
+
   const emptyLabel = useMemo(() => {
     if (loading) return "Cargando horas…";
     return "No hay horas disponibles.";
@@ -148,13 +175,54 @@ export default function ClientHome() {
 
   return (
     <>
-      {/* Botón salir */}
-      <div className="logout-box" onClick={logout}>
-        <span>Salir</span>
+      {/* ===== TOP BAR ===== */}
+      <div className="topbar">
+        <button className="btn" onClick={() => setCartOpen(true)}>
+          🛒 Carrito ({cart.length})
+        </button>
+        <div className="logout-box" onClick={logout}>
+          <span>Salir</span>
+        </div>
       </div>
 
+      {/* ===== CARRITO ===== */}
+      {cartOpen && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3>Carrito</h3>
+
+          {cart.length === 0 ? (
+            <p>No hay citas pendientes de pago.</p>
+          ) : (
+            <>
+              <ul>
+                {cart.map((a) => (
+                  <li key={a._id}>
+                    {a.date} — {(a.time || "").slice(0, 5)} — 30 €
+                  </li>
+                ))}
+              </ul>
+
+              <strong>Total: {total} €</strong>
+
+              <div style={{ marginTop: 10 }}>
+                <button className="btn primary" onClick={payCart}>
+                  Pagar
+                </button>
+                <button
+                  className="btn"
+                  style={{ marginLeft: 8 }}
+                  onClick={() => setCartOpen(false)}
+                >
+                  Cerrar
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="row">
-        {/* Pedir cita */}
+        {/* ===== Pedir cita ===== */}
         <div className="card">
           <h3>Pedir cita</h3>
           <MonthCalendar
@@ -169,36 +237,32 @@ export default function ClientHome() {
                 Horas disponibles el <strong>{date}</strong>
               </p>
 
-              {/* Lista de horas como radios + botón Confirmar */}
               <div className="slots" style={{ gap: 10 }}>
                 {(!Array.isArray(slots) || slots.length === 0) && (
                   <p style={{ opacity: 0.7 }}>{emptyLabel}</p>
                 )}
 
-                {Array.isArray(slots) &&
-                  slots.map((t) => (
-                    <label
-                      key={`${date}-${t}`}
-                      className="slot free"
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 8,
-                        cursor: "pointer",
-                      }}
-                      onClick={() => setSelectedTime(t)}
-                    >
-                      <input
-                        type="radio"
-                        name="slot"
-                        checked={selectedTime === t}
-                        onChange={() => setSelectedTime(t)}
-                      />
-                      <span style={{ minWidth: 56, display: "inline-block" }}>
-                        {t}
-                      </span>
-                    </label>
-                  ))}
+                {slots.map((t) => (
+                  <label
+                    key={`${date}-${t}`}
+                    className="slot free"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      cursor: "pointer",
+                    }}
+                    onClick={() => setSelectedTime(t)}
+                  >
+                    <input
+                      type="radio"
+                      name="slot"
+                      checked={selectedTime === t}
+                      onChange={() => setSelectedTime(t)}
+                    />
+                    <span style={{ minWidth: 56 }}>{t}</span>
+                  </label>
+                ))}
               </div>
 
               <button
@@ -206,11 +270,6 @@ export default function ClientHome() {
                 style={{ marginTop: 10 }}
                 disabled={!date || !selectedTime}
                 onClick={confirmBooking}
-                title={
-                  selectedTime
-                    ? `Reservar ${selectedTime}`
-                    : "Selecciona una hora"
-                }
               >
                 Confirmar reserva
               </button>
@@ -220,7 +279,7 @@ export default function ClientHome() {
           )}
         </div>
 
-        {/* Mis citas */}
+        {/* ===== Mis citas ===== */}
         <div className="card">
           <h3>Mis citas</h3>
           <table>
@@ -246,7 +305,7 @@ export default function ClientHome() {
         </div>
       </div>
 
-      {/* Chat con la clínica */}
+      {/* ===== Chat ===== */}
       {myRoom && (
         <div style={{ marginTop: 16 }}>
           <ChatBox room={myRoom} title="Chat con la clínica" />

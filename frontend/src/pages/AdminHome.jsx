@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import MonthCalendar from "../components/MonthCalendar";
 import ChatBox from "../components/ChatBox";
-import { api, clearAuth } from "../api";
+import { api, clearAuth, graphqlRequest } from "../api";
 
 /* ===== Utils ===== */
 function toMinutes(hhmm = "00:00") {
@@ -83,7 +83,7 @@ function ymd(d) {
 export default function AdminHome() {
   const nav = useNavigate();
 
-  const [tab, setTab] = useState("calendar"); // calendar | clients | appointments
+  const [tab, setTab] = useState("calendar"); // calendar | clients | appointments | payments
 
   // Día seleccionado
   const [date, setDate] = useState("");
@@ -126,6 +126,12 @@ export default function AdminHome() {
   const [personQuery, setPersonQuery] = useState("");
   const [filterDay, setFilterDay] = useState(""); // YYYY-MM-DD
   const [loadingAppts, setLoadingAppts] = useState(false);
+
+  // ===== PAGOS (Orders) =====
+  const [orders, setOrders] = useState([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [ordersError, setOrdersError] = useState("");
+  const [ordersStatus, setOrdersStatus] = useState(""); // "" | "completed" | ...
 
   function logout() {
     clearAuth();
@@ -331,16 +337,57 @@ export default function AdminHome() {
     }
   }
 
+  /* ===== Orders loader (GraphQL) ===== */
+  async function loadOrders() {
+    setLoadingOrders(true);
+    setOrdersError("");
+    try {
+      const query = `
+        query ($status: String) {
+          allOrders(status: $status) {
+            id
+            total
+            status
+            createdAt
+            appointments {
+              date
+              time
+              status
+              clientId {
+                firstName
+                lastName
+              }
+            }
+          }
+        }
+      `;
+      const variables = { status: ordersStatus || null };
+      const data = await graphqlRequest(query, variables);
+      setOrders(data?.allOrders || []);
+    } catch (e) {
+      setOrdersError(e.message || "Error cargando pedidos");
+      setOrders([]);
+    } finally {
+      setLoadingOrders(false);
+    }
+  }
+
   /* ===== Effects ===== */
   useEffect(() => {
     if (tab === "clients") loadClients();
     if (tab === "appointments") loadApptsRange();
+    if (tab === "payments") loadOrders();
   }, [tab]); // eslint-disable-line
 
   /* Re-cargar cuando cambia el filtro de día en la vista Ver citas */
   useEffect(() => {
     if (tab === "appointments") loadApptsRange();
   }, [filterDay]); // eslint-disable-line
+
+  /* Re-cargar pedidos al cambiar filtro de estado */
+  useEffect(() => {
+    if (tab === "payments") loadOrders();
+  }, [ordersStatus]); // eslint-disable-line
 
   /* ===== Derivados ===== */
   const apptsFiltered = useMemo(() => {
@@ -373,6 +420,12 @@ export default function AdminHome() {
             onClick={() => setTab("appointments")}
           >
             Ver citas
+          </button>
+          <button
+            className={`btn ${tab === "payments" ? "primary" : ""}`}
+            onClick={() => setTab("payments")}
+          >
+            Pagos
           </button>
         </div>
         <div className="logout-box" onClick={logout}>
@@ -865,6 +918,86 @@ export default function AdminHome() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* ===== PAGOS (ORDERS) ===== */}
+      {tab === "payments" && (
+        <div className="card">
+          <h3>Pagos</h3>
+
+          <div className="row" style={{ marginBottom: 8 }}>
+            <div>
+              <label>Estado</label>
+              <select
+                value={ordersStatus}
+                onChange={(e) => setOrdersStatus(e.target.value)}
+              >
+                <option value="">Todos</option>
+                <option value="completed">completed</option>
+              </select>
+            </div>
+            <div style={{ alignSelf: "end" }}>
+              <button
+                className="btn"
+                onClick={loadOrders}
+                disabled={loadingOrders}
+              >
+                {loadingOrders ? "Cargando…" : "Actualizar"}
+              </button>
+            </div>
+          </div>
+
+          {ordersError && <p style={{ color: "red" }}>{ordersError}</p>}
+
+          {!loadingOrders && orders.length === 0 && (
+            <p style={{ opacity: 0.8 }}>No hay pagos registrados.</p>
+          )}
+
+          {orders.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Cliente</th>
+                    <th>Citas</th>
+                    <th>Total (€)</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orders.map((o) => {
+                    const firstClient = o.appointments?.[0]?.clientId;
+                    const clientName = firstClient
+                      ? `${firstClient.firstName || ""} ${
+                          firstClient.lastName || ""
+                        }`.trim()
+                      : "—";
+                    return (
+                      <tr key={o.id}>
+                        <td>
+                          {o.createdAt
+                            ? new Date(o.createdAt).toLocaleString()
+                            : "—"}
+                        </td>
+                        <td>{clientName || "—"}</td>
+                        <td>
+                          {(o.appointments || []).map((a, idx) => (
+                            <div key={idx}>
+                              {a.date} {(a.time || "").slice(0, 5)}
+                            </div>
+                          ))}
+                        </td>
+                        <td>{o.total} €</td>
+                        <td>{o.status}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </>

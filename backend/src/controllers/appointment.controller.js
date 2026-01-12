@@ -52,7 +52,7 @@ exports.myHistory = async (req, res, next) => {
 // POST /appointments
 exports.create = async (req, res, next) => {
   try {
-    let { date, time, clientId } = req.body;
+    let { date, time, clientId, status } = req.body;
 
     // Toma clientId del token si no viene en body
     if (!clientId && req.user?.clientId) clientId = req.user.clientId;
@@ -62,12 +62,23 @@ exports.create = async (req, res, next) => {
     }
 
     // Permite reservar si la anterior estaba cancelada
-    const clash = await Appointment.findOne({ date, time, status: { $ne: "cancelled" } });
+    const clash = await Appointment.findOne({
+      date,
+      time,
+      status: { $ne: "cancelled" },
+    });
     if (clash) {
       return res.status(409).json({ error: "Esa hora ya está reservada." });
     }
 
-    const created = await Appointment.create({ date, time, clientId, status: "reserved" });
+    // 👇 AQUÍ ESTÁ LA CLAVE
+    const created = await Appointment.create({
+      date,
+      time,
+      clientId,
+      status: status || "reserved",
+    });
+
     const saved = await Appointment.findById(created._id)
       .populate("clientId", "firstName lastName reason")
       .lean();
@@ -77,6 +88,7 @@ exports.create = async (req, res, next) => {
     next(e);
   }
 };
+
 
 // PATCH /appointments/:id   (status, etc.)
 exports.update = async (req, res, next) => {
