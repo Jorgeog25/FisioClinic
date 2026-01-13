@@ -789,7 +789,7 @@ export default function AdminHome() {
                           }
                         }}
                       >
-                        <option value="user">user</option>
+                        <option value="client">client</option>
                         <option value="admin">admin</option>
                       </select>
                     ) : (

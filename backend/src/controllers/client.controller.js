@@ -76,7 +76,7 @@ exports.updateUserRole = async (req, res, next) => {
     const { userId } = req.params;
     const { role } = req.body;
 
-    if (!["user", "admin"].includes(role)) {
+    if (!["client", "admin"].includes(role)) {
       return res.status(400).json({ error: "Rol no válido" });
     }
 
