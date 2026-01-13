@@ -9,6 +9,13 @@ router.get('/:id', auth(true), requireRole('admin'), ctrl.get);
 router.put('/:id', auth(true), requireRole('admin'), ctrl.update);
 router.delete('/:id', auth(true), requireRole('admin'), ctrl.remove);
 
+router.put(
+  '/users/:userId/role',
+  auth(true),
+  requireRole('admin'),
+  ctrl.updateUserRole
+);
+
 // Client self history (shortcut): /clients/me
 router.get('/me/history', auth(true), async (req, res, next) => {
   req.params.id = req.user.clientId;

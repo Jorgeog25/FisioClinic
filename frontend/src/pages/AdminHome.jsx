@@ -697,6 +697,7 @@ export default function AdminHome() {
                 <th>Nombre</th>
                 <th>Teléfono</th>
                 <th>Motivo</th>
+                <th>Rol</th>
                 <th>Acciones</th>
               </tr>
             </thead>
@@ -767,6 +768,34 @@ export default function AdminHome() {
                           c.reason || "—"
                         )}
                       </td>
+                      <td>
+                        {c.user ? (
+                          <select
+                            value={c.user.role}
+                            onChange={async (e) => {
+                              const newRole = e.target.value;
+
+                              try {
+                                await api.updateUserRole(c.user._id, newRole);
+                              setClients(prev =>
+                                prev.map(x =>
+                                x._id === c._id
+                                ? { ...x, user: { ...x.user, role: newRole } }
+                                : x
+                              )
+                            );
+                          } catch (err) {
+                            alert(err.message || "No se pudo cambiar el rol");
+                          }
+                        }}
+                      >
+                        <option value="user">user</option>
+                        <option value="admin">admin</option>
+                      </select>
+                    ) : (
+                      "—"
+                    )}
+                    </td>
                       <td>
                         {edit ? (
                           <>

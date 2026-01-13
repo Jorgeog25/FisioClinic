@@ -214,6 +214,13 @@ export const api = {
   updateClient: (id, payload) =>
     request(`/clients/${id}`, { method: "PUT", body: payload }),
 
+  updateUserRole: (userId, role) =>
+  request(`/clients/users/${userId}/role`, {
+    method: "PUT",
+    body: { role },
+  }),
+
+
   deleteClient: (id) =>
     request(`/clients/${id}`, { method: "DELETE" }),
 
