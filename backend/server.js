@@ -135,28 +135,34 @@ async function startGraphQL() {
   await apolloServer.start();
 
   app.post(
-    "/graphql",
-    auth(),
-    express.json(),
-    async (req, res) => {
-      const response = await apolloServer.executeOperation(
-        {
-          query: req.body.query,
-          variables: req.body.variables,
-        },
-        {
-          contextValue: {
-            user: {
-             ...req.user,
-              clientId: req.user?.clientId,
-            },
-          },
-        }
-      );
+  "/graphql",
+  auth(),
+  express.json(),
+  async (req, res) => {
+    console.log("USER EN GRAPHQL:", req.user);
 
-      res.status(200).json(response);
+    const response = await apolloServer.executeOperation(
+      {
+        query: req.body.query,
+        variables: req.body.variables,
+      },
+      {
+        contextValue: {
+          user: {
+            ...req.user,
+            clientId: req.user?.clientId,
+          },
+        },
+      }
+    );
+
+    if (response.errors) {
+      console.error("GRAPHQL ERRORS:", response.errors);
     }
-  );
+
+    res.status(200).json(response);
+  }
+);
 }
 
 startGraphQL();

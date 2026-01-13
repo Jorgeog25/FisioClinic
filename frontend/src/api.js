@@ -224,22 +224,30 @@ export const api = {
 
 /* ===== GRAPHQL ===== */
 export async function graphqlRequest(query, variables = {}) {
-  touchActivity();
+  const res = await fetch(
+    import.meta.env.VITE_API_URL.replace("/api", "") + "/graphql",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: sessionStorage.getItem("token")
+          ? "Bearer " + sessionStorage.getItem("token")
+          : "",
+      },
+      body: JSON.stringify({
+        query,
+        variables,
+      }),
+    }
+  );
 
-  const res = await fetch(GRAPHQL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(STORAGE.getItem(TOKEN_KEY)
-        ? { Authorization: "Bearer " + STORAGE.getItem(TOKEN_KEY) }
-        : {}),
-    },
-    body: JSON.stringify({ query, variables }),
-  });
+  if (!res.ok) {
+    throw new Error("Error en petición GraphQL");
+  }
 
   const json = await res.json();
 
-  if (json.errors && json.errors.length) {
+  if (json.errors?.length) {
     throw new Error(json.errors[0].message);
   }
 

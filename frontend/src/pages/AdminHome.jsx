@@ -360,8 +360,13 @@ export default function AdminHome() {
             }
           }
         }
-      `;
-      const variables = { status: ordersStatus || null };
+      }
+    `;
+
+    const variables = {
+      status: ordersStatus || null,
+    };
+
       const data = await graphqlRequest(query, variables);
       setOrders(data?.allOrders || []);
     } catch (e) {
@@ -371,6 +376,7 @@ export default function AdminHome() {
       setLoadingOrders(false);
     }
   }
+
 
   /* ===== Effects ===== */
   useEffect(() => {
@@ -398,6 +404,28 @@ export default function AdminHome() {
     }
     return list;
   }, [apptsAll, personQuery]);
+
+  const ordersFiltered = useMemo(() => {
+  // Todos
+  if (!ordersStatus) return orders;
+
+  // Completed (status de Order)
+  if (ordersStatus === "completed") {
+    return orders.filter((o) => (o.status || "").toLowerCase() === "completed");
+  }
+
+  // Pending_payment (por status de Appointment)
+  if (ordersStatus === "pending_payment") {
+    return orders.filter((o) =>
+      (o.appointments || []).some(
+        (a) => (a.status || "").toLowerCase() === "pending_payment"
+      )
+    );
+  }
+
+  return orders;
+}, [orders, ordersStatus]);
+
 
   return (
     <>
@@ -935,6 +963,7 @@ export default function AdminHome() {
               >
                 <option value="">Todos</option>
                 <option value="completed">completed</option>
+                <option value="pending_payment">pending_payment</option>
               </select>
             </div>
             <div style={{ alignSelf: "end" }}>
@@ -967,13 +996,15 @@ export default function AdminHome() {
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.map((o) => {
-                    const firstClient = o.appointments?.[0]?.clientId;
+                  {ordersFiltered.map((o) => {
+                    const firstClient = o.appointments
+                      ?.map(a => a.clientId)
+                      .find(Boolean);
+
                     const clientName = firstClient
-                      ? `${firstClient.firstName || ""} ${
-                          firstClient.lastName || ""
-                        }`.trim()
+                      ? `${firstClient.firstName} ${firstClient.lastName}`
                       : "—";
+
                     return (
                       <tr key={o.id}>
                         <td>

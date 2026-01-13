@@ -8,8 +8,23 @@ module.exports = {
         throw new Error("No autorizado");
       }
 
-      const filter = status ? { status } : {};
-      return Order.find(filter).populate("appointments");
+      const filter = {};
+      if (status) {
+        filter.status = status;
+      }
+
+      const orders = await Order.find(filter)
+        .populate({
+          path: "appointments",
+          populate: {
+            path: "clientId",
+            select: "firstName lastName",
+          },
+        })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      return orders;
     },
   },
 
@@ -26,9 +41,14 @@ module.exports = {
         throw new Error("Carrito vacío");
       }
 
-      appts.forEach((a) => (a.status = "paid"));
-      await Promise.all(appts.map((a) => a.save()));
+      // Marcar citas como pagadas
+      await Promise.all(
+        appts.map((a) =>
+          Appointment.findByIdAndUpdate(a._id, { status: "paid" })
+        )
+      );
 
+      // Crear pedido
       const order = await Order.create({
         userId: user.id,
         appointments: appts.map((a) => a._id),
@@ -36,7 +56,17 @@ module.exports = {
         status: "completed",
       });
 
-      return order.populate("appointments");
+      // Devolver pedido correctamente poblado
+      return Order.findById(order._id)
+        .populate({
+          path: "appointments",
+          populate: {
+            path: "clientId",
+            select: "firstName lastName reason",
+          },
+        })
+        .populate("userId", "email role")
+        .lean();
     },
   },
 };

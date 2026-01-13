@@ -5,13 +5,11 @@ const OrderSchema = new mongoose.Schema(
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
     },
     appointments: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Appointment",
-        required: true,
       },
     ],
     total: {
@@ -21,7 +19,7 @@ const OrderSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: ["pending", "completed"],
-      default: "completed",
+      default: "pending",
     },
   },
   { timestamps: true }
